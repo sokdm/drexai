@@ -1,3 +1,4 @@
+import { geminiSchema } from "./geminiSchema.js";
 import { withProvider, defaultModel } from "./platformControl.js";
 import { z } from "zod";
 import { env } from "../config/env.js";
@@ -69,7 +70,8 @@ export async function geminiJson<T>(input: {
       body: JSON.stringify({
         model: selectedModel,
         system_instruction: input.system,
-        input: `${input.prompt}\n\nReturn ONLY valid JSON. Do not wrap in markdown.`,
+        input: `${input.prompt}\n\nReturn ONLY valid JSON matching the response schema. Do not wrap in markdown.`,
+        response_format: { type: "text", mime_type: "application/json", schema: geminiSchema(input.schema) },
         generation_config: { max_output_tokens: input.maxOutputTokens ?? 5000, thinking_level: "low" }
       })
     });
@@ -78,7 +80,9 @@ export async function geminiJson<T>(input: {
     return data.output_text ?? extractText(data);
   }));
   const parsed = parseJson(raw);
-  return input.schema.parse(parsed);
+  const result = input.schema.safeParse(parsed);
+  if (!result.success) { const issue = result.error.issues[0]; throw new Error("Gemini returned an invalid structured result at " + (issue.path.join(".") || "project") + ". Please retry; reserved credits will be released."); }
+  return result.data;
 }
 
 export async function geminiText(input: { system: string; prompt: string; maxOutputTokens?: number; model?: string }) {
@@ -109,12 +113,10 @@ export function extractText(data: any): string {
   collect(data); if (!parts.length) throw new Error("Gemini returned no text. Review provider access and model configuration."); return parts.join("\n");
 }
 
-function parseJson(raw: string) {
+export function parseJson(raw: string): unknown {
   const trimmed = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "");
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
-  return JSON.parse(trimmed);
+  try { let result = JSON.parse(trimmed); for (let i = 0; i < 2 && typeof result === "string"; i++) result = JSON.parse(result); return result; }
+  catch { const start = trimmed.indexOf("{"), end = trimmed.lastIndexOf("}"); if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1)); throw new Error("Gemini returned unreadable JSON. Please retry; reserved credits will be released."); }
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 0): Promise<T> {

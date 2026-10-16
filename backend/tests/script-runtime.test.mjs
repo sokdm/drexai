@@ -34,8 +34,8 @@ before(async () => {
   globalThis.fetch = async (url, options) => {
     if (String(url).startsWith("https://generativelanguage.googleapis.com/")) {
       if (mode === "timeout") throw new DOMException("Timed out", "TimeoutError");
-      const payload = JSON.parse(options.body); assert.ok(payload.system_instruction.includes("storyConcept")); assert.ok(options.signal);
-      return new Response(JSON.stringify({ outputs: [{ type: "text", text: JSON.stringify(generated) }] }), { status: 200 });
+      const payload = JSON.parse(options.body); assert.ok(payload.system_instruction.includes("storyConcept")); assert.ok(options.signal); assert.equal(payload.response_format.schema.properties.characters.items.type, "object");
+      return new Response(JSON.stringify({ outputs: [{ type: "text", text: JSON.stringify(mode === "invalid" ? { ...generated, characters: ["Presenter"] } : generated) }] }), { status: 200 });
     }
     return originalFetch(url, options);
   };
@@ -63,5 +63,12 @@ test("placeholder Redis rejects image submission before creating a job or reserv
   const quote = await post("/api/images/quote", settings);
   const result = await post("/api/images/generate", { ...settings, approvedCredits: quote.data.quote.credits });
   assert.match(result.data.error, /actual Render Key Value/); assert.equal(await ImageGenerationJob.countDocuments(), 0);
+  const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
+});
+
+test("malformed character output returns a clear error and releases credits", async () => {
+  mode = "invalid"; const quote = await post("/api/ai/quote", { feature: "story_generation" });
+  const result = await post("/api/ai/scripts/generate", { approvedCredits: quote.data.quote.credits, settings: { storyTopic: "Another story" } });
+  assert.equal(result.status, 500); assert.match(result.data.error, /characters.0/);
   const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
 });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractText } from "../dist/services/gemini.js";
+import { extractText, parseJson, scriptProjectSchema } from "../dist/services/gemini.js";
 import { requireQueueWorker } from "../dist/services/queueReadiness.js";
 import { redisConnection } from "../dist/services/redisConnection.js";
 import { env } from "../dist/config/env.js";
@@ -16,4 +16,16 @@ test("unconfigured Redis and missing workers give actionable errors before gener
   await assert.rejects(() => requireQueueWorker({ getWorkers: async () => [] }), /start the matching/);
   await assert.rejects(() => requireQueueWorker({ getWorkers: async () => { throw new Error("offline"); } }), /Generation queue is unavailable/);
   await requireQueueWorker({ getWorkers: async () => [{ id: "worker" }] });
+});
+
+test("Gemini output schema requires character and scene objects and handles encoded JSON", async () => {
+  const { geminiSchema } = await import("../dist/services/geminiSchema.js"); const schema = geminiSchema(scriptProjectSchema);
+  assert.equal(schema.properties.characters.items.type, "object"); assert.equal(schema.properties.scenes.items.type, "object"); assert.ok(schema.required.includes("title"));
+  assert.deepEqual(parseJson(JSON.stringify(JSON.stringify({ title: "Script" }))), { title: "Script" });
+});
+test("a media worker refuses missing environment variables before claiming readiness", async () => {
+  const { assertMediaWorkerConfig } = await import("../dist/services/mediaWorkerConfig.js");
+  assert.throws(() => assertMediaWorkerConfig({}), /MONGODB_URI/);
+  const settings = Object.fromEntries(["MONGODB_URI", "REDIS_URL", "GEMINI_API_KEY", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"].map(key => [key, "configured"]));
+  assertMediaWorkerConfig(settings); settings.REDIS_URL = "REPLACE_WITH_RENDER_INTERNAL_REDIS_URL"; assert.throws(() => assertMediaWorkerConfig(settings), /REDIS_URL/);
 });

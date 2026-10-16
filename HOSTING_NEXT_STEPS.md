@@ -37,6 +37,8 @@ npm ci --include=dev --include=optional && npm run build --workspace shared && n
 | drex-image-worker | `npm run worker:image --workspace backend` |
 | drex-video-worker | `npm run worker:video --workspace backend` |
 
+**Important:** Render does not inherit web-service environment variables into a new Background Worker. In the worker's Environment page, link the existing private environment group or add the variables directly. A log saying `MONGODB_URI is not set` means this setup is incomplete even if Render labels the service Live.
+
 Both workers need the same `MONGODB_URI`, real `REDIS_URL`, Gemini settings, private R2 settings, `TOKEN_ENCRYPTION_KEY` and provider controls as the web service. Use your shared private environment group or copy values directly in Render. Never copy admin bootstrap credentials into workers. Wait for the logs to say the worker is listening.
 
 On the web service set `IMAGE_QUEUE_ENABLED=true` (currently controls both the standalone image and video queues). Redeploy. Image/video submission checks for Redis and a matching worker before reserving credits. If deployment is incomplete it returns an actionable queue error rather than leaving a charge for an unsubmitted job.
