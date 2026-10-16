@@ -9,6 +9,7 @@ const messageSchema = new Schema({
 
 const aiConversationSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  activeUntil: Date,
   title: { type: String, default: "AI Research Chat" },
   projectId: { type: Schema.Types.ObjectId, ref: "AIProject" },
   nicheId: { type: Schema.Types.ObjectId, ref: "Niche" },

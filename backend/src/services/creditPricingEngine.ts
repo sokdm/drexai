@@ -46,7 +46,8 @@ export async function estimateRouterCost(input: any, policy: any) {
   }
   const published = await routerPricing(input.model, kind), limits = { maxInputTokens: policy.maxInputTokens, maxOutputTokens: policy.maxOutputTokens };
   if (kind === "text") {
-    if (["short_clip_analysis"].includes(input.feature) || settings.multimodal) throw new Error("Verify a bounded multimodal processing cost before enabling automatic pricing for this feature");
+    const boundedMotionImage = input.feature === "ai_motion_prompt" && input.model === "openrouter/openai/gpt-4.1-mini" && settings.boundedImage === true;
+    if (["short_clip_analysis"].includes(input.feature) || settings.multimodal && !boundedMotionImage) throw new Error("Verify a bounded multimodal processing cost before enabling automatic pricing for this feature");
     const record = await verifiedRouterModel(input.model, "text");
     if (record.context_length && limits.maxInputTokens + limits.maxOutputTokens > record.context_length) throw new Error("Pricing token limits exceed this model's context window; lower them or verify an override");
     const rates = published.pricing;
@@ -92,7 +93,7 @@ export async function quoteAutomaticCredits(input: any) {
     estimate = await estimateRouterCost(input, values);
   }
   const requestLimits: any = { ...estimate.limits }, candidates: any[] = [];
-  if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis"].includes(input.feature)) {
+  if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt"].includes(input.feature)) {
     const model = "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
     if (model !== input.model) try {
       const record = await verifiedRouterModel(model, "text");

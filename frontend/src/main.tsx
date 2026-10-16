@@ -31,6 +31,7 @@ import { VoiceStudioPage } from "./pages/dashboard/VoiceStudioPage";
 import { VideoEditorPage } from "./pages/dashboard/VideoEditorPage";
 import "./styles.css";
 import "./admin.css";
+import "./agent.css";
 
 const queryClient = new QueryClient();
 const tools = [

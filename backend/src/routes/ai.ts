@@ -1,3 +1,4 @@
+import { researchAgentRouter } from "./researchAgent.js";
 import { providerFor } from "../services/openrouter.js";
 import { resolveChannel, searchVideos } from "../services/youtube.js";
 import { defaultModel } from "../services/platformControl.js";
@@ -19,6 +20,7 @@ import { randomToken } from "../utils/crypto.js";
 export const aiRouter = Router();
 const limiter = rateLimit({ windowMs: 60 * 1000, limit: 15, standardHeaders: true, legacyHeaders: false });
 aiRouter.use(requireAuth, requireCsrf, limiter);
+aiRouter.use(researchAgentRouter);
 
 async function quoteOrReject(feature: string, approvedCredits?: number, userId?: any) {
   const quote = await approvedTerms(userId, { feature }, approvedCredits!, async () => createQuote({ feature, provider: providerFor(await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL))), model: await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL)), quantity: 1 }));

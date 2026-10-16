@@ -1,3 +1,4 @@
+import { eventStream } from "../../lib/eventStream";
 import { ChannelInsights } from "./ChannelInsights";
 ﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bookmark, Bot, Check, ChevronDown, ExternalLink, Loader2, Search, Send, SlidersHorizontal, Trash2, Youtube } from "lucide-react";
@@ -74,9 +75,15 @@ export function YouTubeResearchPage() {
         const approvedCredits = await quote("ai_channel_analysis");
         const data = await api<any>("/api/ai/analyze-channel", { method: "POST", body: JSON.stringify({ channel, uploads: results, approvedCredits }) }); setInsights(data); setMessages(old => [...old, { role: "assistant", content: data.analysis }]);
       } else {
-        const approvedCredits = await quote("ai_research_chat");
-        const data = await api<any>("/api/ai/chat", { method: "POST", body: JSON.stringify({ conversationId: conversationId || undefined, message: `${prompt}\n\nYou are YouTube Chef, a friendly YouTube research coach. Use short, clear paragraphs with plain text headings. Do not include markdown markers, raw JSON, code blocks or tables. Distinguish observations from suggestions. Research context: ${JSON.stringify(context())}`, approvedCredits }) });
-        if (data.conversation?._id) setConversationId(data.conversation._id); setMessages(old => [...old, { role: "assistant", content: data.answer }]);
+        const payload = { conversationId: conversationId || undefined, message: (prompt + "\nCurrent research context: " + JSON.stringify(context())).slice(0, 5900), draftProject: false };
+        const priced = await api<any>("/api/ai/agent/quote", { method: "POST", body: JSON.stringify(payload) });
+        if (!priced.quote.allowed) throw new Error(priced.quote.reason);
+        if (!window.confirm("Approve " + priced.quote.credits + " credits for YouTube research?")) { setMessage(prompt); return; }
+        setMessages(old => [...old, { role: "assistant", content: "" }]);
+        await eventStream("/api/ai/agent/chat", { ...payload, approvedCredits: priced.quote.credits }, (event, data) => {
+          if (event === "conversation") setConversationId(data.id);
+          if (event === "delta") setMessages(old => old.map((m, i) => i === old.length - 1 ? { ...m, content: String(m.content || "") + data.text } : m));
+        });
       }
     } catch (err) { setChatError(err instanceof Error ? err.message : "Chef could not answer. Please try again."); setMessage(prompt); }
     finally { requestLock.current = false; setThinking(""); }

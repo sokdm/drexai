@@ -1,3 +1,4 @@
+import { downloadMedia } from "../../lib/downloadMedia";
 import { CreativeTools } from "./CreativeTools";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -11,6 +12,7 @@ const defaults = { imageModel: "gemini-nano-banana-2.1", videoModel: "veo-3.1-ge
 const eventColors: Record<string, string> = { waiting: "text-amber-400", processing: "text-sky-400", success: "text-emerald-400", failure: "text-red-400", cancelled: "text-zinc-400" };
 
 export function AIStudioPage() {
+  const [studioMessage, setStudioMessage] = useState(""), [studioReplies, setStudioReplies] = useState<string[]>([]);
   const [studioMode, setStudioMode] = useState("production");
   const [params, setParams] = useSearchParams();
   const [config, setConfig] = useState<any>(null);
@@ -129,6 +131,16 @@ export function AIStudioPage() {
   async function control(action: string) {
     await api(`/api/studio/productions/${productionId}/control`, { method: "POST", body: JSON.stringify({ action }) }); await refresh();
   }
+  async function studioCommand() {
+    const message = studioMessage.trim().toLowerCase(); if (!message || busy) return;
+    await act(async () => { let reply = "";
+      if (/status|progress|what/.test(message)) reply = production ? production.status + ": " + finished + " of " + steps.length + " steps complete; " + spent + " credits settled." : "Choose and approve a script project, then prepare an estimate.";
+      else if (/estimate|plan/.test(message)) { if (!projectId) throw new Error("Choose a project first"); await plan(); reply = "Prepared the real production estimate. Review and approve its spending limit to begin."; }
+      else if (/pause|resume|retry/.test(message)) { if (!productionId) throw new Error("Open a production first"); const operation = /pause/.test(message) ? "pause" : /resume/.test(message) ? "resume" : "retry"; if (!window.confirm("Apply " + operation + " to this production within its approved budget?")) return; await control(operation); reply = "Production control accepted. Check live activity for the worker's next action."; }
+      else reply = "This production coordinator supports status, prepare estimate, pause, resume and retry. Creative research is available in the full AI Assistant. New media generation requires the normal estimate approval.";
+      setStudioReplies(old => [...old, "You: " + studioMessage, reply]); setStudioMessage("");
+    });
+  }
   function chooseProject(value: string) { setProjectId(value); setParams({ projectId: value }); setSceneId(""); setMaxCredits(0); }
   function downloadTimeline() {
     const blob = new Blob([JSON.stringify({ title: production.title, settings: production.settings, timeline: production.timeline }, null, 2)], { type: "application/json" });
@@ -158,7 +170,7 @@ export function AIStudioPage() {
           <Select label="Image model" value={settings.imageModel} options={config?.imageModels.map((m: any) => m.id) ?? []} onChange={v => setSettings({ ...settings, imageModel: v, resolution: config.imageModels.find((m: any) => m.id === v).resolutions[0] })} />
           <Select label="Image resolution" value={settings.resolution} options={imageModel?.resolutions ?? []} onChange={v => setSettings({ ...settings, resolution: v })} />
           <Select label="Aspect ratio" value={settings.aspectRatio} options={["16:9", "9:16"]} onChange={v => setSettings({ ...settings, aspectRatio: v })} />
-          <Select label="Veo model" value={settings.videoModel} options={config?.videoModels.map((m: any) => m.id) ?? []} onChange={v => setSettings({ ...settings, videoModel: v })} />
+          <Select label="Video model" value={settings.videoModel} options={config?.videoModels.map((m: any) => m.id) ?? []} onChange={v => setSettings({ ...settings, videoModel: v })} />
           <Select label="Video quality" value={settings.quality} options={config?.videoModels.find((m: any) => m.id === settings.videoModel)?.qualities ?? []} onChange={v => setSettings({ ...settings, quality: v })} />
           <Select label="Voice model" value={settings.voiceModel} options={config?.voiceModels.map((m: any) => m.id) ?? []} onChange={v => { const model = config.voiceModels.find((m: any) => m.id === v); setSettings({ ...settings, voiceModel: v, voiceId: model.voices[0], language: model.languages[0], characterVoices: {} }); }} />
           <Select label="Narrator voice" value={settings.voiceId} options={voiceModel?.voices ?? []} onChange={v => setSettings({ ...settings, voiceId: v })} />
@@ -168,7 +180,7 @@ export function AIStudioPage() {
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.narration} onChange={e => setSettings({ ...settings, narration: e.target.checked })} />Generate off-screen narration</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.video} onChange={e => setSettings({ ...settings, video: e.target.checked })} />Generate video clips</label>
           <p className="text-xs text-slate-500">Character dialogue and environmental sound are generated by Veo with the video. Narrator voice settings apply only to separate TTS narration. Accent and delivery directions come from each script scene.</p>
-        </div></details>
+        </div></details><section className="studio-asset-library"><h3>Production assets</h3>{assets.filter(a => a.type !== "audio").map(asset => <button key={asset._id} onClick={() => { const step = steps.find((s: any) => s.assetId === asset._id); if (step?.sceneId) setSceneId(step.sceneId); setPreviewAssetId(asset._id); setPreview(false); }}>{urls[asset._id] && (asset.type === "video" ? <video src={urls[asset._id]} muted preload="metadata" /> : <img src={urls[asset._id]} alt="Scene asset" />)}<span>{asset.type}</span></button>)}</section>
       </aside>}
       <main className="studio-center min-w-0 space-y-5">
         {production?.status === "completed" && <div role="status" className="border-l-2 border-emerald-500 bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Your video production is ready. Review native dialogue, voice consistency and mouth synchronization before exporting.</div>}
@@ -190,7 +202,7 @@ export function AIStudioPage() {
         </section>}
         {production && <div className="border-t border-line pt-4 dark:border-slate-800"><div className="flex justify-between gap-2 text-xs text-slate-500"><span>{finished} / {steps.length} steps</span><span>{spent} / {production.maxCredits || production.estimate.credits || 0} credits settled</span></div><progress aria-label="Production progress" value={finished} max={steps.length || 1} className="mt-2 h-2 w-full accent-emerald-500" /></div>}
       </main>
-      {rightOpen && <aside className="studio-activity min-w-0 border-t border-line pt-4 dark:border-slate-800"><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-bold"><Terminal size={17} />Live activity</h2><span className="text-xs text-slate-500">{connected ? "Connected" : productionId ? "Reconnecting" : "Idle"}</span></div><p className="my-3 text-xs text-slate-500">{current?.label ?? production?.status ?? "No active operation"}</p><div role="log" aria-label="Production activity" className="max-h-[65vh] min-h-40 space-y-3 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs leading-5">{events.map(event => <div key={event._id}><time className="text-zinc-500">{new Date(event.createdAt).toLocaleTimeString()}</time><p className={eventColors[event.level] ?? "text-zinc-300"}>{event.message}</p></div>)}{!events.length && <p className="text-zinc-500">No activity yet.</p>}</div>{production?.error && <p className="mt-3 text-sm text-red-500">{production.error}</p>}</aside>}
+      {rightOpen && <aside className="studio-activity min-w-0 border-t border-line pt-4 dark:border-slate-800"><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-bold"><Terminal size={17} />Live activity</h2><span className="text-xs text-slate-500">{connected ? "Connected" : productionId ? "Reconnecting" : "Idle"}</span></div><p className="my-3 text-xs text-slate-500">{current?.label ?? production?.status ?? "No active operation"}</p><div role="log" aria-label="Production activity" className="max-h-[65vh] min-h-40 space-y-3 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs leading-5">{events.map(event => <div key={event._id}><time className="text-zinc-500">{new Date(event.createdAt).toLocaleTimeString()}</time><p className={eventColors[event.level] ?? "text-zinc-300"}>{event.message}</p></div>)}{!events.length && <p className="text-zinc-500">No activity yet.</p>}</div>{production?.error && <p className="mt-3 text-sm text-red-500">{production.error}</p>}<section className="studio-coordinator"><h3>Production coordinator</h3><p className="text-xs text-slate-500">Commands control this production; creative research uses the full assistant.</p>{studioReplies.map((text, i) => <p key={i}>{text}</p>)}<textarea aria-label="Production command" rows={2} value={studioMessage} onChange={e => setStudioMessage(e.target.value)} placeholder="Show progress or prepare an estimate" /><button disabled={busy || !studioMessage.trim()} onClick={() => void studioCommand()}>Run production command</button><Link to="/dashboard/ai-assistant">Open research agent</Link></section></aside>}
     </div>
     {(production || sortedScenes.length > 0) && <footer className="studio-footer bottom-0 z-20 border-t border-line bg-white p-3 dark:border-slate-800 dark:bg-slate-900 lg:sticky">
       <div className="flex gap-2 overflow-x-auto pb-3">{sortedScenes.map((s: any) => <button key={s._id} onClick={() => { setSceneId(s._id); setPreview(false); }} className={`focus-ring w-36 shrink-0 rounded-md border px-3 py-2 text-left text-xs ${scene?._id === s._id ? "border-brand bg-brand/10" : "border-line dark:border-slate-700"}`}><span className="block font-semibold">Scene {s.order}</span><span className="mt-1 block truncate">{s.title}</span><span className="mt-1 block text-slate-500">{steps.filter((step: any) => step.sceneId === String(s._id) && step.status === "completed").length} outputs ready</span></button>)}</div>

@@ -1,4 +1,5 @@
 import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
+import { editingCommand } from "../services/editorCommands.js";
 import { createQuote, reserveCredits, releaseReservation } from "../services/wallet.js";
 import { rememberQuote, approvedTerms } from "../services/managedPricing.js";
 import { checkGenerationUser, assertProviderBudget } from "../services/platformControl.js";
@@ -64,6 +65,15 @@ editorRouter.put("/edits/:id", wrap(async (req, res) => {
   res.json({ edit: updated });
 }));
 editorRouter.post("/edits/:id/suggestions", wrap(async (req, res) => { await own(req); const timeline = timelineSchema.parse(req.body.timeline); res.json({ suggestions: editingSuggestions(timeline), note: "Rule-based editing recommendations; review before applying." }); }));
+editorRouter.post("/edits/:id/command", wrap(async (req, res) => {
+ const edit = await own(req), input = z.object({ message: z.string().min(3).max(1000), timeline: timelineSchema, revision: z.number().int().nonnegative() }).parse(req.body);
+ if (input.revision !== edit.revision) editorFail("This edit changed in another tab. Reload before applying a command.", 409);
+ const assets = await validateTimelineAssets(input.timeline, String(req.user._id));
+ const result = editingCommand(input.timeline, input.message, captionsFromTranscript(input.timeline, assets));
+ await validateTimelineAssets(result.timeline, String(req.user._id));
+ // Return a revision-bound proposal; the existing undo/save workflow owns commit.
+ res.json({ ...result, revision: edit.revision, note: "Applied to the editor preview. Undo or save this change using the existing timeline controls. No AI provider request or credit charge was made." });
+}));
 editorRouter.post("/edits/:id/captions", wrap(async (req, res) => { await own(req); const timeline = timelineSchema.parse(req.body.timeline); const assets = await validateTimelineAssets(timeline, String(req.user._id)); res.json({ captions: captionsFromTranscript(timeline, assets), note: "Phrase timing is estimated. Native dialogue captions require a user-reviewed actual audio transcript; intended script text is not treated as verified speech. Review timing before export." }); }));
 editorRouter.post("/edits/:id/audio", raw({ type: ["audio/*", "application/octet-stream"], limit: "100mb" }), wrap(async (req, res) => {
   const edit = await own(req), role = z.enum(["music", "sfx", "narration", "dialogue"]).parse(req.query.role);

@@ -1,3 +1,4 @@
+import { readProviderStream } from "./providerStream.js";
 import { env } from "../config/env.js";
 import mongoose, { Schema, model } from "mongoose";
 import { geminiSchema } from "./geminiSchema.js";
@@ -55,7 +56,7 @@ export async function recordRouterUsage(id: string, kind: string, data: any, use
   const requestId = data.id || data.generation_id, values = { model: id, kind, userId, ...(requestId ? { requestId } : {}), usage: data.usage || {}, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-type TextInput = { model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
+type TextInput = { onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
 export async function routerText(input: TextInput) {
  const { withProvider, assertProviderBudget } = await import("./platformControl.js");
  const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(!input.media?.length ? input.requestLimits?.fallbacks || [] : [])];
@@ -80,6 +81,7 @@ async function routerTextAttempt(input: TextInput) {
   if (inputBytes > limits.maxInputTokens) throw new Error("Input exceeds this quote's conservative text token limit. Shorten the context or obtain a new verified quote.");
   if (supported.includes("max_tokens")) body.max_tokens = Math.min(input.maxOutputTokens ?? 5000, limits.maxOutputTokens);
   if (input.schema) body.response_format = { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: geminiSchema(input.schema) } };
+  if (input.onDelta) { body.stream = true; body.stream_options = { include_usage: true }; const response = await routerResponse("chat/completions", body, 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId); return result.text; }
   const response = await routerResponse("chat/completions", body, 90000), data = await response.json();
   await recordRouterUsage(input.model, "text", data, input.userId);
   const result = data.choices?.[0]?.message?.content;

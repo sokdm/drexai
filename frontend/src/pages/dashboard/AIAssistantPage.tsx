@@ -1,29 +1,30 @@
-﻿import { FormEvent, useState } from "react";
-import { Bot, Send } from "lucide-react";
-import { Button } from "../../components/ui/Button";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Bot, Send, Plus, MessageSquare, Loader2, FileText } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
-import { quote } from "./aiShared";
+import { eventStream } from "../../lib/eventStream";
 import { ReadableContent } from "../../components/ui/ReadableContent";
-
 export function AIAssistantPage() {
-  const [message, setMessage] = useState("Give me original niche ideas for a faceless YouTube channel.");
-  const [conversationId, setConversationId] = useState("");
-  const [messages, setMessages] = useState<any[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    setLoading(true); setError("");
-    try {
-      const approvedCredits = await quote("ai_research_chat");
-      const data = await api<any>("/api/ai/chat", { method: "POST", body: JSON.stringify({ conversationId: conversationId || undefined, message, approvedCredits }) });
-      setConversationId(data.conversation._id);
-      setMessages(data.conversation.messages);
-      setMessage("");
-    } catch (err) { setError(err instanceof Error ? err.message : "AI chat failed"); }
-    finally { setLoading(false); }
-  }
-
-  return <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]"><section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center gap-3"><Bot className="text-brand" /><div><h2 className="text-3xl font-black">AI Research Assistant</h2><p className="text-slate-600 dark:text-slate-300">Ask for channel analysis, niche ideas, story concepts, titles, and content strategy.</p></div></div>{error && <p className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700 dark:bg-red-950 dark:text-red-200">{error}</p>}<div className="mt-6 space-y-4">{messages.map((m) => <div className={`rounded-md p-4 ${m.role === "user" ? "bg-brand text-white" : "bg-cloud dark:bg-slate-950"}`} key={m._id ?? `${m.role}-${m.createdAt}`}><ReadableContent value={m.content} /></div>)}</div><form className="mt-6 flex gap-2" onSubmit={send}><input value={message} onChange={(e) => setMessage(e.target.value)} className="h-12 min-w-0 flex-1 rounded-md border border-line bg-transparent px-4 dark:border-slate-700" /><Button disabled={loading}><Send size={17} /> {loading ? "Thinking..." : "Send"}</Button></form></section><aside className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-black">Try prompts</h3>{["Analyze this channel.", "Suggest 20 story ideas.", "Create a faceless content strategy.", "Generate a movie concept."].map((prompt) => <button className="mt-3 block w-full rounded-md border border-line p-3 text-left text-sm hover:border-brand dark:border-slate-700" onClick={() => setMessage(prompt)} key={prompt}>{prompt}</button>)}</aside></div>;
+ const [message, setMessage] = useState(""), [conversationId, setConversationId] = useState(""), [messages, setMessages] = useState<any[]>([]), [conversations, setConversations] = useState<any[]>([]);
+ const [busy, setBusy] = useState(false), [error, setError] = useState(""), [progress, setProgress] = useState(""), [quote, setQuote] = useState<any>(null), [draftProject, setDraftProject] = useState(false), [project, setProject] = useState<any>(null);
+ const feed = useRef<HTMLDivElement>(null), locked = useRef(false);
+ const load = () => api<any>("/api/ai/agent/conversations").then(d => setConversations(d.conversations));
+ useEffect(() => { void load().catch(e => setError(e.message)); }, []);
+ useEffect(() => { feed.current?.scrollTo({ top: feed.current.scrollHeight, behavior: "smooth" }); }, [messages, progress]);
+ async function open(id: string) { if (busy) return; try { const d = await api<any>(`/api/ai/agent/conversations/${id}`); setConversationId(id); setMessages(d.conversation.messages); setProject(d.conversation.projectId ? { id: d.conversation.projectId } : null); setQuote(null); setError(""); } catch (e: any) { setError(e.message); } }
+ async function send(e: FormEvent) {
+  e.preventDefault(); if (locked.current || message.trim().length < 2) return; locked.current = true; setBusy(true); setError("");
+  const payload = { message, conversationId: conversationId || undefined, draftProject };
+  try {
+   if (!quote) { const d = await api<any>("/api/ai/agent/quote", { method: "POST", body: JSON.stringify(payload) }); if (!d.quote.allowed) throw new Error(d.quote.reason); setQuote(d.quote); return; }
+   setMessages(old => [...old, { role: "user", content: message }, { role: "assistant", content: "" }]); setProgress("Starting research");
+   await eventStream("/api/ai/agent/chat", { ...payload, approvedCredits: quote.credits }, (event, data) => {
+    if (event === "conversation") setConversationId(data.id);
+    if (event === "progress") setProgress(data.text);
+    if (event === "project") setProject(data);
+    if (event === "delta") setMessages(old => old.map((m, i) => i === old.length - 1 ? { ...m, content: m.content + data.text } : m));
+   }); setMessage(""); await load();
+  } catch (e: any) { setError(e.message); } finally { setBusy(false); locked.current = false; setProgress(""); if (quote) setQuote(null); }
+ }
+ return <div className="agent-workspace"><aside className="agent-sidebar"><header><Bot size={20} /><strong>YouTube Chef</strong></header><button disabled={busy} onClick={() => { setConversationId(""); setMessages([]); setProject(null); setQuote(null); }}><Plus size={15} />New conversation</button><small>Saved conversations</small><nav>{conversations.map(c => <button disabled={busy} aria-current={conversationId === c._id ? "page" : undefined} key={c._id} onClick={() => void open(c._id)}><MessageSquare size={14} /><span>{c.title}</span></button>)}</nav></aside><section className="agent-main"><header><div><h1>Research and create</h1><p>Find opportunities, develop stories and plan your next production.</p></div><div><span>OpenRouter agent</span><select className="agent-mobile-history" aria-label="Saved conversations" disabled={busy} value={conversationId} onChange={e => { if (e.target.value) void open(e.target.value); else { setConversationId(""); setMessages([]); setProject(null); setQuote(null); } }}><option value="">New conversation</option>{conversations.map(c => <option key={c._id} value={c._id}>{c.title}</option>)}</select></div></header><div className="agent-feed" ref={feed} aria-live="polite">{!messages.length && <div className="agent-welcome"><Bot size={34} /><h2>What would you like to create?</h2><p>I can research YouTube videos and channels using real API tools, then help you develop original ideas.</p><div>{["Research underserved video ideas about AI tools", "Compare popular videos about sustainable living", "Develop an original short story with two speaking characters"].map(text => <button key={text} onClick={() => { setMessage(text); setQuote(null); }}>{text}</button>)}</div></div>}{messages.map((m, i) => <article key={m._id || i} className={"agent-message " + m.role}><strong>{m.role === "user" ? "You" : "YouTube Chef"}</strong>{m.content ? <ReadableContent value={m.content} /> : <p>Preparing a response</p>}{m.metadata?.incomplete && <small>Partial response recovered</small>}</article>)}{busy && <p className="agent-progress"><Loader2 size={15} className="animate-spin" />{progress || "Checking credit quote"}</p>}{project && <div className="agent-project"><FileText size={19} /><div><strong>{project.title || "Saved scene draft"}</strong><p>Review and approve scenes before production.</p></div><Link to={`/dashboard/script-builder?projectId=${project.id}`}>Review script</Link><Link to={`/dashboard/ai-studio?projectId=${project.id}`}>Open AI Studio</Link></div>}</div><footer>{error && <p role="alert">{error}</p>}<form onSubmit={send}><textarea aria-label="Message YouTube Chef" required minLength={2} maxLength={6000} rows={2} placeholder="Ask about a channel, niche or story idea" disabled={busy} value={message} onChange={e => { setMessage(e.target.value); setQuote(null); }} /><div><label><input type="checkbox" checked={draftProject} disabled={busy} onChange={e => { setDraftProject(e.target.checked); setQuote(null); }} />Save an original scene draft</label><button disabled={busy || message.trim().length < 2}><Send size={15} />{busy ? "Working" : quote ? `Approve ${quote.credits} credits and send` : "Review cost"}</button></div>{quote && <p>{quote.credits} credits for bounded research{draftProject ? " and a saved draft" : ""}. No media generation or publishing is authorized.</p>}</form></footer></section></div>;
 }

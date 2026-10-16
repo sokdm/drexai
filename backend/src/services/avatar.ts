@@ -1,7 +1,7 @@
 import { env } from "../config/env.js";
 import { withProvider } from "./platformControl.js";
 import { z } from "zod";
-const presenterSchema = z.object({ id: z.string().min(1).max(200), name: z.string().min(1).max(100), voiceId: z.string().min(1).max(200), ownerEmail: z.string().email().optional(), authorizationReference: z.string().min(5).optional() });
+const presenterSchema = z.object({ id: z.string().min(1).max(200), name: z.string().min(1).max(100), voiceId: z.string().min(1).max(200), previewUrl: z.string().url().startsWith("https://").optional(), language: z.string().max(80).optional(), ownerEmail: z.string().email().optional(), authorizationReference: z.string().min(5).optional() });
 export function availablePresenters(email: string) {
   const entries = z.array(presenterSchema).max(100).parse(JSON.parse(env.AVATAR_PRESENTERS_JSON || "[]"));
   return entries.filter(p => !p.ownerEmail || p.ownerEmail.toLowerCase() === email.toLowerCase() && !!p.authorizationReference);

@@ -1,0 +1,31 @@
+# Creator workspace upgrade
+
+This extends existing routes, wallet quotes, MongoDB records, R2 storage, Redis workers and FFmpeg exports. No paid provider smoke tests have been run.
+
+## Working changes
+
+- Full AI Assistant chat workspace, desktop history/sidebar and mobile conversation selector. Messages and original scene drafts persist in existing MongoDB collections. Research quotes are approved before execution.
+- YouTube Chef uses the same streaming agent in its existing panel. It plans up to two real public YouTube API calls (video search/channel lookup), executes only validated tools, reports errors, and grounds its streamed answer in returned evidence. Search uses the existing cached YouTube integration. Private audience analytics are not invented. Draft creation is optional, creates actual projects and character records, and links to script review and Studio. Review/approval is still required before media production.
+- The quote bounds two text calls for research or three when a scene draft is requested. Each call retains approved model, token and spending limits. There is no unbounded autonomous loop. Successful operations settle one reservation; failed runs release the reservation and retain partial answers where available. Gateway usage records retain provider-reported costs independently of user credit pricing.
+- OpenRouter SSE is parsed as received, including usage/error frames; it is not a typing animation over a completed response. Interrupted text is preserved. Conversation leases reject overlapping sends. A dropped browser can reopen its conversation to recover results.
+- Nested calls for the same provider model now share a request-local concurrency scope, removing self-contention while preserving the existing cross-request leases and configured limits.
+- Editor supports backend-validated command proposals for fade transitions, existing/generated transcript captions, animated captions, title cards, first-N-second vertical cuts and music muting. Proposals enter real undo history and the normal versioned save flow. These particular commands are deterministic, not another billable LLM. Unsupported commands explicitly fail. Optional autosave and Ctrl/Cmd-S, Ctrl/Cmd-Z/Shift-Z, space playback and delete shortcuts work outside input fields.
+- Studio layout is more compact, with clickable production assets and a coordinator for status, estimate, pause, resume and retry. This coordinator executes existing production endpoints; it does not pretend to run arbitrary AI operations. Existing credit approval, scene persistence, native dialogue, optional off-screen narration, logs, retries, review and rough-cut handoff remain.
+- Shorts workspace has source-video preview, maximum clip duration, transcript review for extracted moments, inline clip preview and the existing editable timeline/export links. FFmpeg cuts, original audio, approximate speaker-center crop and animated captions remain real. Engagement scores and caption/framing timing remain estimates.
+- Authorized presenter gallery supports optional HTTPS preview images and configured language labels in `AVATAR_PRESENTERS_JSON`. Script preview and provider readiness share the new creator layout. No unsupported voice lists are fabricated.
+- Image-to-video includes an image-aware motion bot. It loads only the user's own source image, resizes to at most 512 pixels, sends low-detail vision input to `openai/gpt-4.1-mini` through OpenRouter, quotes conservative bounded input/output costs, requests approval and inserts an editable prompt without replacing dialogue. Existing API key is reused; live model access is still account dependent.
+
+## Actual limitations and remaining work
+
+- No complete CapCut clone is claimed. Multiple visual overlay lanes, automatic silence cutting, general effects/color grading, playback-speed processing, waveform display and subject tracking are not implemented by these changes. Existing visual sequencing and multiple audio/caption tracks still work. The editor assistant explains unsupported requests.
+- The Studio coordinator supports explicit production commands, not a general LLM tool caller across every editing/rendering action. Rendering still uses the existing editor export approval and dedicated FFmpeg worker.
+- Shorts generates selected-moment speech captions, not a complete source transcript. Speaker framing is an estimated fixed horizontal crop per moment, not continuous face tracking. Full-source ASR and dynamic reframing remain separate work.
+- Avatar rendering preserves the existing direct HeyGen authorized-presenter integration. OpenRouter lists Avatar IV, but existing presenter/voice IDs and consent records are not interchangeable with that gateway's photo/script input. A tested gateway avatar adapter, configurable provider-supported voices/backgrounds and account verification are still required. Do not disable the direct HeyGen credential.
+- Image-to-video accepts an image containing multiple people with speaker-labelled dialogue. Uploading an existing video belongs to the Shorts/editor workflow. Native audio prompts do not guarantee exact voices or lip sync; retain human scene review.
+- Paid live generation, real-account YouTube quota/permissions and live gateway avatar behavior were not tested. Automated tests use provider mocks, isolated MongoDB and real FFmpeg synthetic media/R2 protocol fixtures.
+
+## Deployment
+
+Redeploy the web service and existing Studio/creative/render workers. Keep `OPENROUTER_API_KEY` and existing MongoDB/Redis/R2 variables shared as before. Choose a supported OpenRouter text model for Research chat in Admin / Providers. No new secret is required for streaming. Studio and Shorts still need their respective workers and configured pricing; no successful job status is fabricated when dependencies are absent.
+
+Presenter configuration can optionally add `previewUrl` (HTTPS image) and `language` alongside existing `id`, `name`, `voiceId`, and required ownership/authorization fields for personal avatars. These fields are display metadata; they do not change a provider's supported voice/language capabilities.

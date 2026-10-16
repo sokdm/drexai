@@ -1,4 +1,6 @@
 import { ModelPresentation } from "../models/Finance.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+const executionContext = new AsyncLocalStorage<Set<string>>();
 import { providerFor, isOpenRouter, GatewayBinding, routerCatalog } from "./openrouter.js";
 import { env } from "../config/env.js";
 import mongoose from "mongoose";
@@ -27,9 +29,11 @@ export async function defaultModel(kind: string, fallback: string) { const bindi
 export async function assertProviderBudget(model: string, estimate: number | null | undefined) { const provider = providerFor(model); const policies = await ProviderControl.find({ model: { $in: [model, `${provider}:*`] } }); for (const control of policies) if (!control.enabled || typeof estimate !== "number" || estimate > control.maxJobCostUsd) throw new Error("Provider model is disabled or estimated spending cannot satisfy its per-job cap."); }
 export async function configuredModels<T extends { id: string }>(kind: string, models: T[]) { const binding = await GatewayBinding.findById(kind); const controls = await ProviderControl.find({ model: { $in: models.map(m => m.id) } }); const verified = env.OPENROUTER_API_KEY && ["image", "video", "voice"].includes(kind) ? new Set((await routerCatalog(kind as any).catch(() => [])).map((m: any) => "openrouter/" + m.id)) : new Set<string>(); const presentations = await ModelPresentation.find({ model: { $in: models.map(m => m.id) } }).lean(); return models.map(m => { const p = presentations.find(p => p.model === m.id); return p ? { ...m, label: p.displayName || (m as any).label, qualityTier: p.tier } : m; }).filter(m => (!isOpenRouter(m.id) || !!env.OPENROUTER_API_KEY && verified.has(m.id)) && controls.find(c => c.model === m.id)?.enabled !== false).sort((a, b) => Number(binding?.model === b.id || controls.find(c => c.model === b.id)?.defaultFor === kind) - Number(binding?.model === a.id || controls.find(c => c.model === a.id)?.defaultFor === kind)); }
 export async function withProvider<T>(model: string, execute: () => Promise<T>): Promise<T> {
+  if (executionContext.getStore()?.has(model)) return execute();
+  const executeScoped = () => executionContext.run(new Set([...(executionContext.getStore() || []), model]), execute);
   const provider = providerFor(model);
   const group = await ProviderControl.findOne({ model: `${provider}:*` });
-  const control = await ProviderControl.findOne({ model }); if (!control && !group) return execute();
+  const control = await ProviderControl.findOne({ model }); if (!control && !group) return executeScoped();
   const session = await mongoose.startSession(); let lease: any;
   try { await session.withTransaction(async () => {
     for (const policy of [group, control].filter(Boolean) as any[]) {
@@ -41,5 +45,5 @@ export async function withProvider<T>(model: string, execute: () => Promise<T>):
     [lease] = await ProviderLease.create([{ model, provider, expiresAt: new Date(Date.now() + 300000) }], { session });
   }); } finally { await session.endSession(); }
   const heartbeat = setInterval(() => void ProviderLease.updateOne({ _id: lease._id }, { $set: { expiresAt: new Date(Date.now() + 300000) } }).catch(() => {}), 60000); heartbeat.unref();
-  try { return await execute(); } finally { clearInterval(heartbeat); await ProviderLease.deleteOne({ _id: lease._id }); }
+  try { return await executeScoped(); } finally { clearInterval(heartbeat); await ProviderLease.deleteOne({ _id: lease._id }); }
 }
