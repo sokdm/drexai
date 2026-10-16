@@ -1,4 +1,4 @@
-import { providerFor } from "./openrouter.js";
+import { isOpenRouter, providerFor } from "./openrouter.js";
 import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
 import { createQuote } from "./wallet.js";
 import { CreditPackage } from "../models/CreditPackage.js";
@@ -11,6 +11,12 @@ export async function priceStudioSteps(steps: StudioStep[]) {
     const feature = step.kind === "image" ? "text_to_image" : step.kind === "audio" ? "voice_generation" : "image_to_video";
     const provider = providerFor(step.input.model);
     const unit = step.kind === "image" ? `image:${step.input.resolution}` : step.kind === "video" ? `second:${step.input.quality}` : "character";
+    if (isOpenRouter(step.input.model)) {
+      const quantity = step.kind === "audio" ? step.input.text.length : step.kind === "video" ? step.input.durationSeconds : 1;
+      const quote = await createQuote({ feature, provider, model: step.input.model, quantity, unit, settings: step.input });
+      if (!quote.allowed) { missing.add(`${step.input.model}: ${(quote as any).reason}`); step.credits = 0; continue; }
+      step.credits = quote.credits; step.pricing = { ...quote, providerCostUsd: quote.estimatedCostUsd, costIsEstimate: true }; step.input.requestLimits = (quote as any).requestLimits; continue;
+    }
     const rule = await GenerationPriceRule.findOne({ feature, provider, model: step.input.model, unit, active: true });
     if (!rule || rule.unit !== unit || !(rule.creditsPerUnit > 0) || !(rule.providerCostUsd > 0)) {
       missing.add(`${step.input.model} / ${unit}`); step.credits = 0; continue;

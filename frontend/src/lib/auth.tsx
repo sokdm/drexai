@@ -12,7 +12,7 @@ export type User = {
   status: string;
   emailVerified: boolean;
   onboarding?: { completed?: boolean; skipped?: boolean; step?: number };
-  preferences?: { appearance?: "system" | "light" | "dark"; emailUpdates?: boolean };
+  preferences?: { appearance?: "system" | "light" | "dark"; emailUpdates?: boolean; supportEmails?: boolean; generationNotifications?: boolean; marketingEmails?: boolean };
 };
 
 type AuthContextValue = {
@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => { if (user?.preferences?.appearance) { localStorage.setItem("theme", user.preferences.appearance); window.dispatchEvent(new Event("theme:changed")); } }, [user?.id, user?.preferences?.appearance]);
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => null);
     setUser(null);

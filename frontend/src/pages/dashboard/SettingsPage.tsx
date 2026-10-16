@@ -5,72 +5,29 @@ import { useAuth } from "../../lib/auth";
 
 export function SettingsPage() {
   const { user, refresh, logout } = useAuth();
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [message, setMessage] = useState("");
-  const [profile, setProfile] = useState({ displayName: user?.displayName ?? "", profilePictureUrl: user?.profilePictureUrl ?? "", appearance: user?.preferences?.appearance ?? "system" });
+  const [sessions, setSessions] = useState<any[]>([]), [message, setMessage] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const [profile, setProfile] = useState({ displayName: "", profilePictureUrl: "", appearance: "system", supportEmails: true, generationNotifications: true, emailUpdates: true, marketingEmails: false });
   const [passwords, setPasswords] = useState({ currentPassword: "", password: "", confirmPassword: "" });
-
-  useEffect(() => { api<{ sessions: any[] }>("/api/account/sessions").then((data) => setSessions(data.sessions)).catch(() => null); }, []);
-
-  async function saveProfile(event: FormEvent) {
-    event.preventDefault();
-    const data = await api("/api/account/profile", { method: "PATCH", body: JSON.stringify({ displayName: profile.displayName, profilePictureUrl: profile.profilePictureUrl, preferences: { appearance: profile.appearance } }) });
-    setMessage("Profile updated");
-    await refresh();
-    return data;
-  }
-
-  async function changePassword(event: FormEvent) {
-    event.preventDefault();
-    await api("/api/account/password", { method: "PATCH", body: JSON.stringify(passwords) });
-    setPasswords({ currentPassword: "", password: "", confirmPassword: "" });
-    setMessage("Password changed");
-  }
-
-  async function restartTour() {
-    await api("/api/account/onboarding", { method: "PATCH", body: JSON.stringify({ restart: true }) });
-    await refresh();
-  }
-
-  return (
-    <div className="grid gap-6 xl:grid-cols-2">
-      <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-2xl font-black">Account settings</h2>
-        {message && <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">{message}</p>}
-        <form className="mt-6 space-y-4" onSubmit={saveProfile}>
-          <Field label="Display name" value={profile.displayName} onChange={(value) => setProfile({ ...profile, displayName: value })} />
-          <Field label="Profile picture URL" value={profile.profilePictureUrl} onChange={(value) => setProfile({ ...profile, profilePictureUrl: value })} />
-          <label className="block text-sm font-semibold">Appearance<select value={profile.appearance} onChange={(event) => {
-            const appearance = event.currentTarget.value;
-            if (appearance === "system" || appearance === "light" || appearance === "dark") {
-              setProfile((current) => ({ ...current, appearance }));
-            }
-          }} className="mt-2 h-11 w-full rounded-md border border-line bg-transparent px-3 dark:border-slate-700"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-          <Button type="submit">Save profile</Button>
-        </form>
-      </section>
-      <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-2xl font-black">Security</h2>
-        <form className="mt-6 space-y-4" onSubmit={changePassword}>
-          <Field label="Current password" type="password" value={passwords.currentPassword} onChange={(value) => setPasswords({ ...passwords, currentPassword: value })} />
-          <Field label="New password" type="password" value={passwords.password} onChange={(value) => setPasswords({ ...passwords, password: value })} />
-          <Field label="Confirm password" type="password" value={passwords.confirmPassword} onChange={(value) => setPasswords({ ...passwords, confirmPassword: value })} />
-          <Button type="submit">Change password</Button>
-        </form>
-      </section>
-      <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-2xl font-black">Connected sessions</h2>
-        <div className="mt-4 space-y-3">{sessions.map((session) => <div className="rounded-md border border-line p-3 text-sm dark:border-slate-700" key={session._id}>{session.userAgent || "Unknown device"}<br /><span className="text-slate-500">{new Date(session.createdAt).toLocaleString()}</span></div>)}</div>
-        <Button className="mt-5" variant="secondary" onClick={logout}>Log out</Button>
-      </section>
-      <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-2xl font-black">Onboarding and account</h2>
-        <div className="mt-5 flex flex-wrap gap-3"><Button onClick={restartTour}>Restart tour</Button><Button variant="secondary" onClick={() => api("/api/account/deletion-request", { method: "POST", body: "{}" }).then(() => setMessage("Deletion requested"))}>Request account deletion</Button></div>
-      </section>
-    </div>
-  );
+  const loadSessions = async () => setSessions((await api<any>("/api/account/sessions")).sessions);
+  useEffect(() => { if (user) setProfile({ displayName: user.displayName, profilePictureUrl: user.profilePictureUrl || "", appearance: user.preferences?.appearance || "system", supportEmails: user.preferences?.supportEmails !== false, generationNotifications: user.preferences?.generationNotifications !== false, emailUpdates: user.preferences?.emailUpdates !== false, marketingEmails: user.preferences?.marketingEmails === true }); }, [user]);
+  useEffect(() => { loadSessions().catch(err => setError(err.message)); }, []);
+  async function action(fn: () => Promise<void>, success: string) { if (busy) return; setBusy(true); setError(""); setMessage(""); try { await fn(); setMessage(success); } catch (err) { setError(err instanceof Error ? err.message : "Could not save. Please try again."); } finally { setBusy(false); } }
+  async function saveProfile(event: FormEvent) { event.preventDefault(); await action(async () => {
+    const { displayName, profilePictureUrl, ...preferences } = profile;
+    await api("/api/account/profile", { method: "PATCH", body: JSON.stringify({ displayName, profilePictureUrl, preferences }) });
+    localStorage.setItem("theme", profile.appearance); window.dispatchEvent(new Event("theme:changed")); await refresh();
+  }, "Settings saved"); }
+  async function changePassword(event: FormEvent) { event.preventDefault(); await action(async () => {
+    if (passwords.password !== passwords.confirmPassword) throw new Error("New passwords do not match");
+    await api("/api/account/password", { method: "PATCH", body: JSON.stringify(passwords) }); setPasswords({ currentPassword: "", password: "", confirmPassword: "" });
+  }, "Password changed"); }
+  return <div className="space-y-5"><header><h1 className="text-2xl font-bold">Your settings</h1><p className="text-sm text-slate-500">Manage your profile, preferences and account security.</p></header>{error && <p role="alert" className="rounded-md bg-red-50 p-3 text-red-700">{error}</p>}{message && <p role="status" className="rounded-md bg-emerald-50 p-3 text-emerald-700">{message}</p>}<div className="grid gap-6 xl:grid-cols-2">
+    <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-xl font-bold">Profile and preferences</h2><p className="mt-2 text-sm text-slate-500">{user?.email}</p><form className="mt-5 space-y-4" onSubmit={saveProfile}><fieldset disabled={busy} className="space-y-4"><Field label="Display name" value={profile.displayName} onChange={v => setProfile({ ...profile, displayName: v })} /><Field label="Profile picture URL (optional)" type="url" required={false} value={profile.profilePictureUrl} onChange={v => setProfile({ ...profile, profilePictureUrl: v })} /><label className="block text-sm font-semibold">Appearance<select className="mt-2 h-11 w-full rounded-md border border-line bg-transparent px-3 dark:border-slate-700" value={profile.appearance} onChange={e => setProfile({ ...profile, appearance: e.target.value })}><option value="system">Use device setting</option><option value="light">Light</option><option value="dark">Dark</option></select></label>{([['supportEmails', 'Support reply emails'], ['generationNotifications', 'Generation notifications'], ['emailUpdates', 'Optional product updates'], ['marketingEmails', 'Marketing emails']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={profile[key]} onChange={e => setProfile({ ...profile, [key]: e.target.checked })} />{label}</label>)}<p className="text-xs text-slate-500">Security and necessary payment emails remain enabled.</p><Button type="submit" disabled={busy}>{busy ? "Saving..." : "Save settings"}</Button></fieldset></form></section>
+    <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-xl font-bold">Password</h2><form className="mt-5 space-y-4" onSubmit={changePassword}><fieldset disabled={busy} className="space-y-4"><Field label="Current password" type="password" value={passwords.currentPassword} onChange={v => setPasswords({ ...passwords, currentPassword: v })} /><Field label="New password" type="password" minLength={10} value={passwords.password} onChange={v => setPasswords({ ...passwords, password: v })} /><Field label="Confirm password" type="password" minLength={10} value={passwords.confirmPassword} onChange={v => setPasswords({ ...passwords, confirmPassword: v })} /><Button type="submit" disabled={busy}>Change password</Button></fieldset></form></section>
+    <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-xl font-bold">Signed-in devices</h2><div className="mt-4 space-y-3">{sessions.map(session => <div className="rounded-md border border-line p-3 text-sm dark:border-slate-700" key={session._id}><p className="break-words">{session.userAgent || "Unknown device"}</p><p className="text-slate-500">{new Date(session.createdAt).toLocaleString()}{session.current ? " / This device" : ""}</p>{!session.current && <button disabled={busy} className="mt-2 text-brand" onClick={() => void action(async () => { await api(`/api/account/sessions/${session._id}`, { method: "DELETE" }); await loadSessions(); }, "Device signed out")}>Sign out this device</button>}</div>)}{!sessions.length && <p>No active device information available.</p>}</div><Button className="mt-5" variant="secondary" onClick={logout}>Sign out</Button></section>
+    <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-xl font-bold">Account tools</h2><div className="mt-5 flex flex-wrap gap-3"><Button disabled={busy} onClick={() => void action(async () => { await api("/api/account/onboarding", { method: "PATCH", body: JSON.stringify({ restart: true }) }); await refresh(); }, "Getting-started tour restarted")}>Restart tour</Button><Button disabled={busy} variant="secondary" onClick={() => { if (window.confirm("Request account deletion? Support will review your request.")) void action(async () => { await api("/api/account/deletion-request", { method: "POST", body: "{}" }); await refresh(); }, "Deletion requested. Contact support to discuss your request."); }}>Request account deletion</Button></div></section>
+  </div></div>;
 }
-
-function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
-  return <label className="block text-sm font-semibold">{label}<input required type={type} value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-line bg-transparent px-3 dark:border-slate-700" /></label>;
+function Field({ label, value, onChange, type = "text", required = true, minLength }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean; minLength?: number }) {
+ return <label className="block text-sm font-semibold">{label}<input required={required} minLength={minLength} autoComplete={type === "password" ? label === "Current password" ? "current-password" : "new-password" : undefined} type={type} value={value} onChange={e => onChange(e.target.value)} className="mt-2 h-11 w-full rounded-md border border-line bg-transparent px-3 dark:border-slate-700" /></label>;
 }

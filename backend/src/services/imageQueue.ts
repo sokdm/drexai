@@ -6,7 +6,7 @@ import { env } from "../config/env.js";
 export type ImageJobPayload = { jobId: string };
 
 let imageQueue: Queue<ImageJobPayload> | undefined;
-function getImageQueue() {
+export function getImageQueue() {
 if (imageQueue) return imageQueue;
 imageQueue = new Queue<ImageJobPayload>("image-generation", {
   connection: redisConnection(false),

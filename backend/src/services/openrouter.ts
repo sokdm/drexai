@@ -41,6 +41,7 @@ export async function routerResponse(endpoint: string, body?: any, timeout = 180
   const response = await fetch(base + endpoint, { method: body ? "POST" : "GET", redirect: "error", headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeout) });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
+    if (body && mongoose.connection.readyState === 1) await GatewayUsage.create({ model: "openrouter/" + body.model, kind: endpoint === "chat/completions" ? "text" : endpoint === "images" ? "image" : endpoint === "audio/speech" ? "voice" : "video", status: "failed", usage: { httpStatus: response.status, costUnknown: true } });
     throw Object.assign(new Error(`OpenRouter request failed (${response.status}): ${String(data.error?.message || "Review provider access, balance and model availability").slice(0, 500)}`), { providerRejected: response.status < 500 });
   }
   return response;
@@ -51,12 +52,15 @@ export async function recordRouterUsage(id: string, kind: string, data: any, use
   const requestId = data.id || data.generation_id, values = { model: id, kind, userId, ...(requestId ? { requestId } : {}), usage: data.usage || {}, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-export async function routerText(input: { model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string }) {
+export async function routerText(input: { model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number } }) {
   const record = await verifiedRouterModel(input.model, "text"), supported = record.supported_parameters || [];
   if (!supported.includes("max_tokens")) throw new Error("Choose an OpenRouter model with a supported output token limit");
   if (input.schema && !supported.includes("response_format")) throw new Error("Choose an OpenRouter text model with structured output support");
   const body: any = { model: routerId(input.model), messages: [{ role: "system", content: input.system }, { role: "user", content: input.media?.length ? [{ type: "text", text: input.prompt }, ...input.media] : input.prompt }], provider: { require_parameters: true, allow_fallbacks: false } };
-  if (supported.includes("max_tokens")) body.max_tokens = input.maxOutputTokens ?? 5000;
+  const limits = input.requestLimits || { maxInputTokens: 20000, maxOutputTokens: 12000 };
+  const inputBytes = Buffer.byteLength(input.system + input.prompt, "utf8");
+  if (inputBytes > limits.maxInputTokens) throw new Error("Input exceeds this quote's conservative text token limit. Shorten the context or obtain a new verified quote.");
+  if (supported.includes("max_tokens")) body.max_tokens = Math.min(input.maxOutputTokens ?? 5000, limits.maxOutputTokens);
   if (input.schema) body.response_format = { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: geminiSchema(input.schema) } };
   const response = await routerResponse("chat/completions", body, 90000), data = await response.json();
   await recordRouterUsage(input.model, "text", data, input.userId);

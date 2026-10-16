@@ -1,0 +1,12 @@
+import { Schema, model } from "mongoose";
+export const PricingPolicy = model("PricingPolicy", new Schema({ _id: String, revision: { type: Number, default: 1 }, values: Schema.Types.Mixed, updatedBy: Schema.Types.ObjectId }, { timestamps: true }));
+export const ProviderSnapshot = model("ProviderSnapshot", new Schema({ _id: String, values: Schema.Types.Mixed, syncedAt: Date, attemptedAt: Date, error: String }, { timestamps: true }));
+export const ProviderActivity = model("ProviderActivity", new Schema({ identity: { type: String, unique: true }, date: { type: String, index: true }, model: String, provider: String, requests: Number, promptTokens: Number, completionTokens: Number, costUsd: Number, raw: Schema.Types.Mixed }, { timestamps: true }));
+export const PricingOverride = model("PricingOverride", new Schema({ feature: String, model: String, unit: String, costUsd: String, verificationUrl: String, verifiedAt: Date, expiresAt: Date, settings: Schema.Types.Mixed, actorId: Schema.Types.ObjectId }, { timestamps: true }));
+export const ModelPresentation = model("ModelPresentation", new Schema({ model: { type: String, unique: true }, displayName: String, tier: { type: String, enum: ["standard", "enhanced", "premium", "ultra"] }, verificationUrl: String }, { timestamps: true }));
+export const OperationalAlert = model("OperationalAlert", new Schema({ key: { type: String, unique: true }, title: String, content: String, severity: String, readAt: Date, lastOccurredAt: Date, count: { type: Number, default: 1 } }, { timestamps: true }));
+export const AppMigration = model("AppMigration", new Schema({ _id: String, appliedAt: Date }));
+export const DailySpendBudget = model("DailySpendBudget", new Schema({ _id: String, admittedUsd: { type: Number, default: 0 } }, { timestamps: true }));
+export const EmailTemplate = model("EmailTemplate", new Schema({ _id: String, subject: String, body: String }, { timestamps: true }));
+export const EmailDelivery = model("EmailDelivery", new Schema({ eventKey: String, recipient: String, subject: String, status: String, provider: String, error: String }, { timestamps: true }));
+export const WebsiteSettings = model("WebsiteSettings", new Schema({ _id: String, siteName: String, description: String, supportEmail: String }, { timestamps: true }));

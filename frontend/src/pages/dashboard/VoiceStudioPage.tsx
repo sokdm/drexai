@@ -1,3 +1,4 @@
+import { useAutomaticQuote } from "../../lib/useAutomaticQuote";
 import { FormEvent, useEffect, useMemo, useState, useRef } from "react";
 import { Download, Mic2, Play, RefreshCw, Send, Trash2, Volume2 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export function VoiceStudioPage() {
     ] as SpeakerLine[]
   });
 
+  useAutomaticQuote("/api/voice/quote", cleanPayload(form), !loading && (form.mode === "multi" ? form.speakers.every((s: any) => s.text.trim()) : form.text.trim().length > 0), setQuote, setError);
   const selectedModel = useMemo(() => config.models.find((model: any) => model.id === form.model) ?? config.models[0], [config.models, form.model]);
   const selectedProject = useMemo(() => config.projects.find((project: any) => project._id === form.projectId), [config.projects, form.projectId]);
   const selectedScene = selectedProject?.scenes?.find((scene: any) => scene._id === form.sceneId);

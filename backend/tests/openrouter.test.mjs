@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -19,7 +20,7 @@ import { GenerationPriceRule } from "../dist/models/GenerationPriceRule.js";
 import { ProviderControl } from "../dist/models/Admin.js";
 import { runMedia } from "../dist/services/ffmpeg.js";
 const original = globalThis.fetch, originalKey = env.OPENROUTER_API_KEY;
-let db, dir, mp3, video, png, fail = false, requests = [];
+let db, dir, mp3, video, png, fail = false, requests = [], pricingAvailable = false;
 const models = [
  { id: "google/gemini-3.8-flash", architecture: { input_modalities: ["text", "image", "video"], output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], pricing: { prompt: "0.000001", completion: "0.000002" } },
  { id: "google/gemini-3.8-flash-tts", architecture: { output_modalities: ["speech"] }, pricing: { prompt: "0.00001" } }
@@ -27,7 +28,7 @@ const models = [
 const image = { id: "google/gemini-nano-banana-2.1", architecture: { output_modalities: ["image"] }, supported_parameters: { resolution: { type: "enum", values: ["1K", "2K"] }, aspect_ratio: { type: "enum", values: ["16:9", "1:1"] }, input_references: { type: "range", min: 0, max: 14 } } };
 before(async () => {
  env.OPENROUTER_API_KEY = "test-router-key";
- db = await MongoMemoryReplSet.create({ replSet: { count: 1 } }); await mongoose.connect(db.getUri("gateway_tests"));
+ db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }], binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } }); await mongoose.connect(db.getUri("gateway_tests"));
  dir = await mkdtemp(path.join(tmpdir(), "drex-router-test-"));
  png = await sharp({ create: { width: 100, height: 100, channels: 3, background: "red" } }).png().toBuffer();
  await runMedia("ffmpeg", ["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", path.join(dir, "speech.mp3")]); mp3 = await readFile(path.join(dir, "speech.mp3"));
@@ -37,6 +38,7 @@ before(async () => {
   if (u.pathname === "/api/v1/models") return Response.json({ data: models });
   if (u.pathname === "/api/v1/images/models") return Response.json({ data: [image] });
   if (u.pathname === "/api/v1/videos/models") return Response.json({ data: [{ id: "google/veo-3.1", supported_durations: [4, 6, 8], supported_resolutions: ["720p", "1080p"], supported_aspect_ratios: ["16:9", "9:16"] }] });
+  if (u.pathname.endsWith("/endpoints")) return pricingAvailable ? Response.json({ endpoints: [{ provider_name: "Test", pricing: [{ billable: "output_image", unit: "image", cost_usd: "0.04" }] }] }) : Response.json({}, { status: 503 });
   assert.equal(options.headers.Authorization, "Bearer test-router-key");
   const body = options.body ? JSON.parse(options.body) : undefined; requests.push({ path: u.pathname, body });
   if (fail) return Response.json({ error: { message: "Quota test failure" } }, { status: 429 });
@@ -77,15 +79,18 @@ test("unsupported settings and unknown pricing fail closed without a paid reques
  await assert.rejects(() => routerText({ model: "openrouter/nonexistent", system: "s", prompt: "p" }), /not verified/);
  await assert.rejects(() => createRouterVideo({ model: "openrouter/google/veo-3.1", durationSeconds: 20 }), /capability/);
  assert.throws(() => checkCapability(image, "unsupported", true), /does not support/);
- await assert.rejects(() => managedPrice("text_to_image", "openrouter", { model: "openrouter/google/gemini-nano-banana-2.1", resolution: "1K", numberOfImages: 1 }, 2), /verified OpenRouter pricing/);
+ await assert.rejects(() => managedPrice("text_to_image", "openrouter", { model: "openrouter/google/gemini-nano-banana-2.1", resolution: "1K", numberOfImages: 1 }, 2), /pricing is unavailable/);
  assert.equal(requests.length, count);
 });
 test("credit rule and approved quote remain stable when defaults and prices change", async () => {
+ pricingAvailable = true;
+ const { CreditPackage } = await import("../dist/models/CreditPackage.js"), { PricingPolicy } = await import("../dist/models/Finance.js"), { defaultPricingPolicy } = await import("../dist/services/creditPricingEngine.js");
+ await CreditPackage.create({ key: "creator", name: "Creator", credits: 5000, amount: 90, currency: "USD", active: true });
  const model = "openrouter/google/gemini-nano-banana-2.1", userId = new mongoose.Types.ObjectId();
  await GenerationPriceRule.create({ feature: "text_to_image", provider: "openrouter", model, unit: "image:1K", creditsPerUnit: 8, providerCostUsd: 0.04, active: true });
- const settings = { model, resolution: "1K", numberOfImages: 2 }; const quote = await managedPrice("text_to_image", "openrouter", settings, 2); assert.equal(quote.credits, 16);
- await rememberQuote(userId, settings, quote); await GenerationPriceRule.updateOne({ model }, { creditsPerUnit: 20 });
- assert.equal((await approvedTerms(userId, settings, 16, () => managedPrice("text_to_image", "openrouter", settings, 2))).credits, 16);
+ const settings = { model, resolution: "1K", numberOfImages: 2 }; const quote = await managedPrice("text_to_image", "openrouter", settings, 2); assert.equal(quote.credits, 40);
+ await rememberQuote(userId, settings, quote); await PricingPolicy.create({ _id: "global", revision: 2, values: { ...defaultPricingPolicy, markup: 12 } });
+ assert.equal((await approvedTerms(userId, settings, 40, () => managedPrice("text_to_image", "openrouter", settings, 2))).credits, 40);
  await GatewayBinding.create({ _id: "story_generation", model: "openrouter/google/gemini-3.8-flash" }); assert.equal(await defaultModel("story_generation", "legacy"), "openrouter/google/gemini-3.8-flash");
 });
 test("provider limits remain enforced and explicit failures are not blindly replayed", async () => {

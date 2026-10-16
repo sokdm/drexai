@@ -116,7 +116,7 @@ studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {
           if (source.reservationId) await closeStudioReserve(String(source.reservationId), "replaced_by_regeneration_plan", session);
         }
       }
-      const reservation: any = await reserveCredits(String(req.user._id), { credits: maxCredits, feature: "ai_studio_production", productionId: production._id }, `studio-budget:${production._id}`, session);
+      const reservation: any = await reserveCredits(String(req.user._id), { credits: maxCredits, feature: "ai_studio_production", productionId: production._id, ...(production.steps.some((s: any) => s.input.model.startsWith("openrouter/")) ? { provider: "openrouter", estimatedCostUsd: production.steps.filter((s: any) => !s.reused && s.input.model.startsWith("openrouter/")).reduce((total: number, s: any) => total + Number(s.pricing?.providerCostUsd || 0), 0) } : {}) }, `studio-budget:${production._id}`, session);
       updated = await StudioProduction.findOneAndUpdate({ _id: production._id, status: "draft" }, { $set: { reservationId: reservation._id, maxCredits: reservation.credits, approvedAt: new Date(), status: "queued", control: "run" }, $inc: { queueRevision: 1 } }, { new: true, session });
     });
   } finally { await session.endSession(); }

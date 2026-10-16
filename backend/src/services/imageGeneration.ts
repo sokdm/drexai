@@ -4,9 +4,9 @@ import { withProvider } from "./platformControl.js";
 import { env } from "../config/env.js";
 
 const directImageModels = [
-  { id: "gemini-nano-banana-2.1", label: "Nano Banana 2.1", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 4, characterReference: true },
+  { id: "gemini-nano-banana-2.1", label: "Nano Banana 2.1", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 10, characterReference: true },
   { id: "gemini-3.1-flash-lite-image", label: "Nano Banana 2 Lite", aspectRatios: ["1:1", "16:9", "9:16"], resolutions: ["1K"], maxImages: 4, characterReference: false },
-  { id: "gemini-3-pro-image", label: "Nano Banana Pro", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 2, characterReference: true }
+  { id: "gemini-3-pro-image", label: "Nano Banana Pro", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 10, characterReference: true }
 ];
 
 const routerImageModels = directImageModels.map(m => ({ ...m, id: "openrouter/google/" + m.id, label: m.label + " via OpenRouter" }));

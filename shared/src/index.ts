@@ -17,6 +17,7 @@ export const creditPackageSchema = z.object({
 export type CreditPackage = z.infer<typeof creditPackageSchema>;
 
 export const creditPackages: CreditPackage[] = [
-  { id: "starter", name: "Starter", credits: 1000, priceUsd: 15 },
-  { id: "creator", name: "Creator", credits: 5000, priceUsd: 50 }
+  { id: "mini", name: "Mini", credits: 500, priceUsd: 10 },
+  { id: "starter", name: "Starter", credits: 1000, priceUsd: 20 },
+  { id: "creator", name: "Creator", credits: 5000, priceUsd: 90 }
 ];

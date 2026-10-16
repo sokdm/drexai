@@ -79,6 +79,9 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         step.status = "needs_review"; throw new Error("This legacy dialogue plan requires a new native audiovisual quote. Completed assets are preserved; regenerate the scene with a new plan.");
       }
       if (await finishControl()) return;
+      await checkGenerationUser(String(production.userId));
+      if (!step.reused) await assertProviderBudget(step.input.model, step.pricing?.providerCostUsd);
+      if (step.input.model.startsWith("openrouter/") && !step.providerJobId) await (await import("./openrouterManagement.js")).checkProviderAffordability(Number(step.pricing?.providerCostUsd));
       const assets = await MediaAsset.find({ _id: { $in: steps.map(s => s.assetId).filter(Boolean) }, userId: production.userId, deletedAt: null }).lean();
       if (step.kind === "video") {
         const duration = sceneDuration(step.sceneId, steps, assets, production.settings.targetSeconds / production.snapshot.scenes.length);

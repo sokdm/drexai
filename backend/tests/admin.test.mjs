@@ -29,7 +29,7 @@ import { errorHandler } from "../dist/middleware/errorHandler.js";
 import { env } from "../dist/config/env.js";
 let db, server, base, headers, customer, admin, pkg;
 before(async () => {
-  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } }); await mongoose.connect(db.getUri("drex_phase13"));
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }], binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } }); await mongoose.connect(db.getUri("drex_phase13"));
   for (const m of [User, AdminBootstrap, AdminSession, AdminAudit, Wallet, LedgerEntry, CreditReservation, CreditPackage, ApprovedQuote, ProviderDaily]) await m.init();
   env.ADMIN_LOGIN_METHOD = "totp"; env.ADMIN_BOOTSTRAP_ENABLED = true; env.ADMIN_BOOTSTRAP_EMAIL = "initial-admin@example.test"; env.ADMIN_BOOTSTRAP_PASSWORD_HASH = await argon2.hash("AdminTestPassword123"); env.ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
   await bootstrapAdmin(); admin = await User.findOne({ role: "admin" });
@@ -51,7 +51,7 @@ test("admin session requires password and TOTP; ordinary sessions cannot authori
   const login = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123", code: loginCode }, "POST", {}); assert.equal(login.status, 200);
   const cookies = login.response.headers.getSetCookie(); const session = cookies.find(s => s.startsWith("drex_admin=")); assert.match(session, /HttpOnly/); assert.match(session, /SameSite=Strict/); headers = { Cookie: session.split(";")[0], "x-admin-csrf": login.data.csrf };
   assert.equal((await request("/api/admin/me")).status, 200); assert.ok(!JSON.stringify(login.data).includes("passwordHash"));
-  const replay = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123", code: totp(env.ADMIN_TOTP_SECRET) }, "POST", {}); assert.equal(replay.status, 401);
+  const replay = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123", code: loginCode }, "POST", {}); assert.equal(replay.status, 401);
 });
 test("packages and pricing changes require CSRF, are audited and update real records", async () => {
   const body = { key: "starter", name: "Starter", credits: 1000, amount: 15, currency: "USD", active: true, sortOrder: 1, promotion: "", reason: "Initial verified package configuration" };

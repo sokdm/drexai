@@ -1,3 +1,4 @@
+import { useAutomaticQuote } from "../../lib/useAutomaticQuote";
 import { FormEvent, useCallback, useEffect, useState, useRef } from "react";
 import { ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
@@ -13,6 +14,7 @@ export function TextToImagePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<any>({ prompt: "", stylePreset: "Cinematic", model: "gemini-nano-banana-2.1", aspectRatio: "16:9", resolution: "1K", numberOfImages: 1, characterReferenceIds: [] });
+  useAutomaticQuote("/api/images/quote", form, !busy && form.prompt.trim().length >= 3, setQuote, setError);
   const selectedModel = config.models.find((model: any) => model.id === form.model) ?? config.models[0];
   const load = useCallback(async () => {
     const [cfg, history] = await Promise.all([api<any>("/api/images/config"), api<any>("/api/images/jobs")]);
@@ -43,7 +45,7 @@ export function TextToImagePage() {
     try { await api(`/api/images/assets/${asset._id}`, { method: "DELETE" }); await load(); } catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
   }
   return <div className="generation-workspace">
-    <header className="generation-heading"><div className="flex items-center gap-2"><ImageIcon size={18} className="text-teal-600" /><h1>Text to Image</h1></div><span>Gemini</span></header>
+    <header className="generation-heading"><div className="flex items-center gap-2"><ImageIcon size={18} className="text-teal-600" /><h1>Text to Image</h1></div><span>{form.model.startsWith("openrouter/") ? "OpenRouter" : "Gemini"}</span></header>
     <div className="generation-layout">
       <form className="generation-controls" aria-label="Image settings" onSubmit={submit}>
         <header className="control-heading"><h2>Create an image</h2><p>Describe your image, choose a style, then review the cost.</p></header>

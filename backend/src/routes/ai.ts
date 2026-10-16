@@ -42,7 +42,7 @@ aiRouter.post("/chat", async (req, res, next) => {
     if (!conversation) return res.status(404).json({ error: "Conversation not found" });
     conversation.messages.push({ role: "user", content: input.message });
     const context = await loadContext(String(req.user._id), input.projectId, input.nicheId);
-    const answer = await geminiText({ model: quote.model, userId: String(req.user._id),
+    const answer = await geminiText({ model: quote.model, userId: String(req.user._id), requestLimits: (quote as any).requestLimits,
       system: "You are Drex AI, a YouTube research and story-development assistant. Be practical, original, and label inferences. Do not invent private analytics.",
       prompt: `Context:\n${JSON.stringify(context)}\n\nConversation:\n${conversation.messages.map((m: any) => `${m.role}: ${m.content}`).join("\n")}\n\nAnswer the latest user message.`
     });
@@ -65,7 +65,7 @@ aiRouter.post("/analyze-channel", async (req, res, next) => {
     reservation = await reserveCredits(String(req.user._id), quote, `ai-channel:${input.channel?.id ?? randomToken(6)}:${randomToken(4)}`);
     const source = await resolveChannel(String(input.channel?.id || ""));
     const competitors = await searchVideos({ q: source.channel.topics?.map((t: string) => decodeURIComponent(t.split("/").pop() || "").replaceAll("_", " ")).slice(0, 2).join(" ") || source.uploads[0]?.title || source.channel.title, maxResults: 12, order: "relevance" });
-    const analysis = await geminiJson({ model: quote.model, userId: String(req.user._id),
+    const analysis = await geminiJson({ model: quote.model, userId: String(req.user._id), requestLimits: (quote as any).requestLimits,
       schema: channelAnalysisSchema,
       system: "Analyze only the supplied server-verified public YouTube metadata. Research topics, competitor performance, content gaps, keywords, audience interests and underserved video ideas. Include actionable contentBriefs with hooks and outlines, evidence-based contentGaps and keywords. Label interests, trends and gaps as limited-sample inferences. Lifetime views do not measure growth. Never invent CTR, revenue, watch time, search volume or audience analytics.",
       prompt: `Return an object containing mainNiche (string), contentThemes (string array), commonVideoFormats (string array), publishingPatterns (string), popularTopics (string array), audiencePositioningInference (string), titlePatterns (string array), creativeOpportunities (string array), potentialNicheIdeas (array of {name,rationale}), limitations (string array), keywords (string array), audienceInterests (string array), contentGaps (array of {topic,evidence,opportunity}), and contentBriefs (array of {title,audience,hook,outline:string[],keywords:string[],rationale}). Analyze this channel for YouTube automation research:\n${JSON.stringify({ ...source, competitors: competitors.items.filter((v: any) => v.channelId !== source.channel.id) })}`
@@ -134,7 +134,7 @@ aiRouter.post("/scripts/generate", async (req, res, next) => {
     reservation = await reserveCredits(String(req.user._id), quote, `story:${randomToken(8)}`);
     const niche = input.settings.nicheId ? await Niche.findOne({ _id: input.settings.nicheId, userId: req.user._id }) : null;
     const generated = await geminiJson({
-      model: quote.model, userId: String(req.user._id), maxOutputTokens: 12000,
+      model: quote.model, userId: String(req.user._id), requestLimits: (quote as any).requestLimits, maxOutputTokens: 12000,
       schema: scriptProjectSchema,
       system: "Create original, structured YouTube scripts. Return a JSON object with title, storyConcept, summary, characters (array) and scenes (array). Each scene must include order (number), title, sceneDescription, characters (string array), narration, dialogue, imagePrompt, videoMotionPrompt, cameraDirection, estimatedNarrationTiming, audioSuggestions and transitionSuggestions. Keep the existing string fields for compatibility. Also include dialogueLines as an ordered array of objects {speaker, text, language, accent, emotion, delivery}, dialogueLanguage, preferredAccent, emotionAndDelivery, characterActions, cameraPosition, cameraMovements, environmentalSounds, soundEffects, backgroundAmbience, estimatedDurationSeconds (number), visibleSpeakingCharacters (boolean), offscreenNarration (boolean). Identify every speaker and quote exact intended speech. Each dialogue scene must fit an eight-second Veo native audiovisual clip, at most 14 spoken words; divide longer conversations into sequential scenes. Do not put the same speech in narration and dialogue. Set offscreenNarration true only for a separate narrator. Voice preferences are descriptive guidance, never guaranteed cloning. Keep the result to at most 12 practical scenes. Keep content appropriate for a general audience.",
       prompt: `Generate a structured project with scene-level prompts. Settings: ${JSON.stringify(input.settings)}\nNiche: ${JSON.stringify(niche)}`

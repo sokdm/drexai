@@ -14,15 +14,15 @@ accountRouter.use(requireAuth, requireCsrf);
 accountRouter.patch("/profile", async (req, res, next) => {
   try {
     const input = z.object({
-      displayName: z.string().min(2).max(80).optional(),
-      profilePictureUrl: z.string().url().optional().or(z.literal("")),
-      preferences: z.object({ appearance: z.enum(["system", "light", "dark"]).optional(), emailUpdates: z.boolean().optional() }).optional()
+      displayName: z.string().trim().min(2).max(80).optional(),
+      profilePictureUrl: z.string().url().refine(v => v.startsWith("https://"), "Use an HTTPS image URL").optional().or(z.literal("")),
+      preferences: z.object({ appearance: z.enum(["system", "light", "dark"]).optional(), emailUpdates: z.boolean().optional(), supportEmails: z.boolean().optional(), generationNotifications: z.boolean().optional(), marketingEmails: z.boolean().optional() }).optional()
     }).parse(req.body);
     if (input.displayName) req.user.displayName = input.displayName;
     if (input.profilePictureUrl !== undefined) req.user.profilePictureUrl = input.profilePictureUrl || undefined;
-    if (input.preferences) req.user.preferences = { ...req.user.preferences, ...input.preferences };
+    if (input.preferences) req.user.preferences = { ...((req.user.preferences as any)?.toObject?.() || req.user.preferences), ...input.preferences };
     await req.user.save();
-    res.json({ user: req.user });
+    res.json({ user: { id: req.user._id, displayName: req.user.displayName, profilePictureUrl: req.user.profilePictureUrl, preferences: req.user.preferences } });
   } catch (error) {
     next(error);
   }
@@ -44,7 +44,7 @@ accountRouter.patch("/password", async (req, res, next) => {
 
 accountRouter.get("/sessions", async (req, res) => {
   const sessions = await Session.find({ userId: req.user._id, revokedAt: null, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 }).select("userAgent ip createdAt expiresAt");
-  res.json({ sessions });
+  res.json({ sessions: sessions.map(session => ({ ...session.toObject(), current: String(session._id) === String(req.sessionDoc?._id) })) });
 });
 
 accountRouter.post("/deletion-request", async (req, res) => {
@@ -72,4 +72,8 @@ accountRouter.patch("/onboarding", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+accountRouter.delete("/sessions/:id", async (req, res, next) => {
+  try { const id = z.string().regex(/^[a-f\d]{24}$/i).parse(req.params.id); const result = await Session.updateOne({ _id: id, userId: req.user._id, revokedAt: null }, { $set: { revokedAt: new Date() } }); if (!result.modifiedCount) return res.status(404).json({ error: "Session not found" }); res.json({ ok: true }); } catch (error) { next(error); }
 });

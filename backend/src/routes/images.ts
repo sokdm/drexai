@@ -27,7 +27,7 @@ const requestSchema = z.object({
   model: z.string(),
   aspectRatio: z.string(),
   resolution: z.string(),
-  numberOfImages: z.number().min(1).max(4),
+  numberOfImages: z.number().int().min(1).max(10),
   characterReferenceIds: z.array(z.string()).default([]),
   projectId: z.string().optional(),
   approvedCredits: z.number().optional()

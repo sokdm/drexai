@@ -5,7 +5,7 @@ import { env } from "../config/env.js";
 
 let videoQueue: Queue<{ jobId: string }> | undefined;
 
-function getVideoQueue() {
+export function getVideoQueue() {
   if (videoQueue) return videoQueue;
   videoQueue ??= new Queue<{ jobId: string }>("video-generation", {
     connection: redisConnection(false),

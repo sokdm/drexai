@@ -13,7 +13,7 @@ import { LedgerEntry } from "../dist/models/LedgerEntry.js";
 let db, server, base, owner, pkg, current, providerCalls = 0;
 const originalFetch = globalThis.fetch;
 before(async () => {
-  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } });
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }], binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } });
   await mongoose.connect(db.getUri("drex_payments"));
   for (const model of [Payment, Wallet, LedgerEntry]) await model.init();
   owner = new mongoose.Types.ObjectId(); pkg = new mongoose.Types.ObjectId();

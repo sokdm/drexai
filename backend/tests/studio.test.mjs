@@ -28,7 +28,7 @@ import { hashSecret } from "../dist/utils/crypto.js";
 
 let database, server, base;
 before(async () => {
-  database = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  database = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }] });
   await mongoose.connect(database.getUri("drex_studio_tests"));
   for (const model of [StudioProduction, StudioEvent, AIProject, Wallet, LedgerEntry, CreditReservation, MediaAsset, User, Session]) await model.init();
   const app = express(); app.use(express.json(), cookieParser()); app.use("/studio", studioRouter); app.use("/wallet", walletRouter); app.use(errorHandler);

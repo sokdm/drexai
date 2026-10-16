@@ -1,3 +1,4 @@
+import { useAutomaticQuote } from "../../lib/useAutomaticQuote";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Check, Film, FolderOpen, Loader2, Upload, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
@@ -19,6 +20,7 @@ export function ImageToVideoPage() {
   const picker = useRef<HTMLInputElement>(null);
   const library = useRef<HTMLDialogElement>(null);
   const [form, setForm] = useState<any>({ sourceImageAssetId: params.get("imageId") ?? "", motionPrompt: "", model: "veo-3.1-generate-preview", aspectRatio: "16:9", durationSeconds: 8, quality: "720p", quantity: 1, dialogueText: "", dialogueLines: [], dialogueLanguage: "English", preferredAccent: "", characterActions: "", cameraDirection: "", environmentalSounds: "", soundEffects: "", backgroundAmbience: "" });
+  useAutomaticQuote("/api/videos/quote", { ...form, dialogueLines: String(form.dialogueText || "").split("\n").filter(line => line.trim()).map(line => { const colon = line.indexOf(":"); return { speaker: colon >= 0 ? line.slice(0, colon).trim() : "Speaker", text: colon >= 0 ? line.slice(colon + 1).trim() : line.trim() }; }) }, !busy && !uploading && !!form.sourceImageAssetId && form.motionPrompt.trim().length >= 3, setQuote, setError);
   const selectedModel = config.models.find((model: any) => model.id === form.model) ?? config.models[0];
   const selectedImage = config.images.find((image: any) => image._id === form.sourceImageAssetId);
   const load = useCallback(async () => {

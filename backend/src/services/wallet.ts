@@ -1,3 +1,5 @@
+import { AppMigration, DailySpendBudget } from "../models/Finance.js";
+import { AdminAudit } from "../models/Admin.js";
 import { isOpenRouter } from "./openrouter.js";
 import { checkGenerationUser, assertProviderBudget } from "./platformControl.js";
 import { ProviderControl } from "../models/Admin.js";
@@ -9,8 +11,18 @@ import { LedgerEntry } from "../models/LedgerEntry.js";
 import { Wallet } from "../models/Wallet.js";
 
 export async function seedCreditConfig() {
-  await CreditPackage.updateOne({ key: "starter" }, { $setOnInsert: { key: "starter", name: "Starter", credits: 1000, amount: 15, currency: "USD", sortOrder: 1, active: true } }, { upsert: true });
-  await CreditPackage.updateOne({ key: "creator" }, { $setOnInsert: { key: "creator", name: "Creator", credits: 5000, amount: 50, currency: "USD", sortOrder: 2, active: true } }, { upsert: true });
+  await CreditPackage.updateOne({ key: "starter" }, { $setOnInsert: { key: "starter", name: "Starter", credits: 1000, amount: 20, currency: "USD", sortOrder: 1, active: true } }, { upsert: true });
+  await CreditPackage.updateOne({ key: "creator" }, { $setOnInsert: { key: "creator", name: "Creator", credits: 5000, amount: 90, currency: "USD", sortOrder: 2, active: true } }, { upsert: true });
+  await CreditPackage.updateOne({ key: "mini" }, { $setOnInsert: { key: "mini", name: "Mini", credits: 500, amount: 10, currency: "USD", sortOrder: 0, active: true } }, { upsert: true });
+  const migrationSession = await mongoose.startSession();
+  try { await migrationSession.withTransaction(async () => {
+    if (await AppMigration.findById("credit-packages-20261016").session(migrationSession)) return;
+    for (const [key, credits, before, amount] of [["starter", 1000, 15, 20], ["creator", 5000, 50, 90]] as const) {
+      const changed = await CreditPackage.findOneAndUpdate({ key, credits, amount: before, currency: "USD", promotion: { $in: ["", null] } }, { $set: { amount } }, { session: migrationSession });
+      if (changed) await AdminAudit.create([{ action: "default-package-upgrade", target: key, reason: "Owner requested updated credit package prices", before: { amount: before, credits }, after: { amount, credits } }], { session: migrationSession });
+    }
+    await AppMigration.create([{ _id: "credit-packages-20261016", appliedAt: new Date() }], { session: migrationSession });
+  }); } finally { await migrationSession.endSession(); }
   const rules = [
     ["ai_research_chat", "gemini", "gemini-3.8-flash", "request"],
     ["publishing_optimization", "gemini", "gemini-3.8-flash", "request"],
@@ -50,6 +62,7 @@ export async function creditPurchase({ userId, credits, idempotencyKey, metadata
 }
 
 export async function createQuote(input: any) {
+  if (isOpenRouter(input.model)) { try { return await (await import("./creditPricingEngine.js")).quoteAutomaticCredits(input); } catch (error: any) { return { allowed: false, credits: 0, reason: error.message, feature: input.feature, provider: input.provider, model: input.model }; } }
   const rule = await GenerationPriceRule.findOne({ feature: input.feature, provider: input.provider, model: input.model, active: true, ...(input.unit ? { unit: input.unit } : {}), ...(input.ruleId ? { _id: input.ruleId } : {}) });
   if (isOpenRouter(input.model) && (!rule || !(rule.providerCostUsd > 0))) return { allowed: false, credits: 0, reason: "Configure verified OpenRouter provider pricing before generating." };
   if (!rule) return { allowed: false, credits: 0, reason: "Pricing is not active until provider costs are verified." };
@@ -59,7 +72,10 @@ export async function createQuote(input: any) {
 }
 
 export async function reserveCredits(userId: string, quote: any, idempotencyKey: string, outerSession?: mongoose.ClientSession): Promise<any> {
+  const prior = await CreditReservation.findOne({ idempotencyKey }).session(outerSession ?? null);
+  if (prior) { if (String(prior.userId) !== userId) throw new Error("Reservation ownership mismatch"); return prior; }
   await checkGenerationUser(userId);
+  if (quote.provider === "openrouter" && quote.estimatedCostUsd !== undefined) await (await import("./openrouterManagement.js")).checkProviderAffordability(quote.estimatedCostUsd);
   if (quote.model) await assertProviderBudget(quote.model, quote.estimatedCostUsd);
   const control = quote.model ? await ProviderControl.findOne({ model: quote.model }) : null;
   if (control && (!control.enabled || typeof quote.estimatedCostUsd !== "number" || quote.estimatedCostUsd > control.maxJobCostUsd)) throw new Error("Provider is disabled or the job spending cap cannot be satisfied.");
@@ -71,6 +87,15 @@ export async function reserveCredits(userId: string, quote: any, idempotencyKey:
     if (existing) {
       if (String(existing.userId) !== userId) throw new Error("Reservation ownership mismatch");
       reservation = existing; return;
+    }
+    if (quote.provider === "openrouter" && quote.estimatedCostUsd > 0) {
+      const { values } = await (await import("./creditPricingEngine.js")).getPricingPolicy();
+      const day = new Date().toISOString().slice(0, 10);
+      for (const [key, limit] of [["global:" + day, values.globalDailyUsd], ["user:" + userId + ":" + day, values.userDailyUsd]] as const) {
+        await DailySpendBudget.updateOne({ _id: key }, { $setOnInsert: { admittedUsd: 0 } }, { upsert: true, session });
+        const admitted = await DailySpendBudget.updateOne({ _id: key, admittedUsd: { $lte: limit - quote.estimatedCostUsd } }, { $inc: { admittedUsd: quote.estimatedCostUsd } }, { session });
+        if (!admitted.modifiedCount) throw new Error("Daily generation spending admission limit reached. Try again after the next UTC day or contact support.");
+      }
     }
     const wallet = await ensureWallet(userId, session);
     if (wallet.availableCredits < quote.credits) throw new Error("Insufficient credits");

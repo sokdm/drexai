@@ -37,7 +37,7 @@ const jsonPost = body => ({ method: "POST", body: JSON.stringify(body) });
 async function request(path, token = "user", options = {}) { const r = await fetch(base + path, { ...options, headers: { ...headers(token), ...options.headers } }); return { status: r.status, data: await r.json() }; }
 before(async () => {
   env.SMTP_HOST = undefined; env.SMTP_USER = undefined; env.SMTP_PASS = undefined;
-  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } }); await mongoose.connect(db.getUri("drex_phase12"));
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }], binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) } }); await mongoose.connect(db.getUri("drex_phase12"));
   for (const m of [SupportTicket, SupportMessage, SupportAttachment, SupportEmail, Feedback, Notification, NotificationCursor, LedgerEntry]) await m.init();
   for (const [token, role] of [["user", "user"], ["stranger", "user"], ["admin", "admin"], ["agent", "support"]]) {
     const u = await User.create({ displayName: token, email: `${token}@example.test`, passwordHash: "test", role, status: "active" });

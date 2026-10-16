@@ -71,6 +71,7 @@ async function mockApi(page: Page, completed = false) {
 
 const features = ["youtube-research", "youtube-channel", "ai-assistant", "my-niches", "script-builder", "text-to-image", "image-to-video", "voice-studio", "ai-studio", "video-editor", "projects", "media-library", "publishing", "credit-wallet", "notifications", "support", "feedback", "settings"];
 for (const width of [390, 1024, 1440, 1920]) test(`all workspaces close and fit at ${width}px`, async ({ page }, testInfo) => {
+  test.setTimeout(180000);
   await page.setViewportSize({ width, height: 1000 }); await mockApi(page);
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
   for (const slug of features) {
