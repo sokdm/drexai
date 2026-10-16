@@ -1,3 +1,4 @@
+import { providerFor } from "../services/openrouter.js";
 import { sceneAudioFields } from "../services/sceneAudio.js";
 import { AIProject } from "../models/AIProject.js";
 import { configuredModels } from "../services/platformControl.js";
@@ -61,7 +62,7 @@ videosRouter.post("/quote", async (req, res, next) => {
   try {
     const settings = validateVideoSettings(requestSchema.partial({ approvedCredits: true }).parse(req.body));
     if (!await MediaAsset.exists({ _id: settings.sourceImageAssetId, userId: req.user._id, type: "image", deletedAt: null })) return res.status(404).json({ error: "Source image not found" });
-    res.json({ quote: { ...(await rememberQuote(req.user._id, settings, await managedPrice("image_to_video", "google-veo", settings, videoCreditCost(settings)))), settings, clipPlan: planClipDurations(settings.durationSeconds, settings.model) } });
+    res.json({ quote: { ...(await rememberQuote(req.user._id, settings, await managedPrice("image_to_video", providerFor(settings.model), settings, videoCreditCost(settings)))), settings, clipPlan: planClipDurations(settings.durationSeconds, settings.model) } });
   } catch (error) { next(error); }
 });
 
@@ -69,7 +70,7 @@ videosRouter.post("/generate", async (req, res, next) => {
   let job: any, reservation: any;
   try {
     const settings = validateVideoSettings(requestSchema.parse(req.body));
-    const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("image_to_video", "google-veo", settings, videoCreditCost(settings)));
+    const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("image_to_video", providerFor(settings.model), settings, videoCreditCost(settings)));
     const credits = terms.credits;
     if (settings.approvedCredits !== credits) return res.status(400).json({ error: `Approve ${credits} credits before generating.` });
     const source = settings.sourceImageAssetId ? await MediaAsset.findOne({ _id: settings.sourceImageAssetId, userId: req.user._id, type: "image", deletedAt: null }) : null;
@@ -78,7 +79,7 @@ videosRouter.post("/generate", async (req, res, next) => {
     if (settings.sceneId && !settings.projectId) return res.status(400).json({ error: "A scene requires its project" });
     await assertVideoQueueReady();
     reservation = await reserveCredits(String(req.user._id), terms, `video:${req.user._id}:${Date.now()}:${settings.motionPrompt.slice(0, 24)}`);
-    job = await VideoGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: "google-veo", status: "queued", approvedCredits: credits });
+    job = await VideoGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(settings.model), status: "queued", approvedCredits: credits });
     const queued = await enqueueVideoJob(String(job._id));
     if (!queued) processVideoJob(String(job._id)).catch(() => null);
     res.status(202).json({ job });

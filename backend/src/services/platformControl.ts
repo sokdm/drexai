@@ -1,3 +1,5 @@
+import { providerFor, isOpenRouter, GatewayBinding, routerCatalog } from "./openrouter.js";
+import { env } from "../config/env.js";
 import mongoose from "mongoose";
 import { PlatformControl, ProviderControl, ProviderLease, ProviderDaily } from "../models/Admin.js";
 import { User } from "../models/User.js";
@@ -18,11 +20,11 @@ export async function platformGate(req: any, res: any, next: any) {
   } catch (e) { next(e); }
 }
 export async function checkGenerationUser(userId: string) { const user = await User.findById(userId); if (user && (user.status === "suspended" || user.aiRestricted)) throw new Error("AI generation is restricted for this account."); }
-export async function defaultModel(kind: string, fallback: string) { const policy = await ProviderControl.findOne({ defaultFor: kind, enabled: true }); return policy?.model || fallback; }
-export async function assertProviderBudget(model: string, estimate: number | null | undefined) { const provider = model === "heygen-avatar" || model.startsWith("heygen:") ? "heygen" : model.startsWith("veo-") ? "google-veo" : model === "ffmpeg" ? "ffmpeg" : "gemini"; const policies = await ProviderControl.find({ model: { $in: [model, `${provider}:*`] } }); for (const control of policies) if (!control.enabled || typeof estimate !== "number" || estimate > control.maxJobCostUsd) throw new Error("Provider model is disabled or estimated spending cannot satisfy its per-job cap."); }
-export async function configuredModels<T extends { id: string }>(kind: string, models: T[]) { const controls = await ProviderControl.find({ model: { $in: models.map(m => m.id) } }); return models.filter(m => controls.find(c => c.model === m.id)?.enabled !== false).sort((a, b) => Number(controls.find(c => c.model === b.id)?.defaultFor === kind) - Number(controls.find(c => c.model === a.id)?.defaultFor === kind)); }
+export async function defaultModel(kind: string, fallback: string) { const binding = await GatewayBinding.findById(kind); if (binding?.model) return binding.model; const policy = await ProviderControl.findOne({ defaultFor: kind, enabled: true }); return policy?.model || (env.OPENROUTER_API_KEY && kind === "text" ? "openrouter/" + env.OPENROUTER_TEXT_MODEL : fallback); }
+export async function assertProviderBudget(model: string, estimate: number | null | undefined) { const provider = providerFor(model); const policies = await ProviderControl.find({ model: { $in: [model, `${provider}:*`] } }); for (const control of policies) if (!control.enabled || typeof estimate !== "number" || estimate > control.maxJobCostUsd) throw new Error("Provider model is disabled or estimated spending cannot satisfy its per-job cap."); }
+export async function configuredModels<T extends { id: string }>(kind: string, models: T[]) { const binding = await GatewayBinding.findById(kind); const controls = await ProviderControl.find({ model: { $in: models.map(m => m.id) } }); const verified = env.OPENROUTER_API_KEY && ["image", "video", "voice"].includes(kind) ? new Set((await routerCatalog(kind as any).catch(() => [])).map((m: any) => "openrouter/" + m.id)) : new Set<string>(); return models.filter(m => (!isOpenRouter(m.id) || !!env.OPENROUTER_API_KEY && verified.has(m.id)) && controls.find(c => c.model === m.id)?.enabled !== false).sort((a, b) => Number(binding?.model === b.id || controls.find(c => c.model === b.id)?.defaultFor === kind) - Number(binding?.model === a.id || controls.find(c => c.model === a.id)?.defaultFor === kind)); }
 export async function withProvider<T>(model: string, execute: () => Promise<T>): Promise<T> {
-  const provider = model === "heygen-avatar" || model.startsWith("heygen:") ? "heygen" : model.startsWith("veo-") ? "google-veo" : model === "ffmpeg" ? "ffmpeg" : "gemini";
+  const provider = providerFor(model);
   const group = await ProviderControl.findOne({ model: `${provider}:*` });
   const control = await ProviderControl.findOne({ model }); if (!control && !group) return execute();
   const session = await mongoose.startSession(); let lease: any;

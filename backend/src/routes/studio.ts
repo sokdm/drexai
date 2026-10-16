@@ -1,3 +1,4 @@
+import { configuredModels } from "../services/platformControl.js";
 import { Router, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -31,13 +32,13 @@ async function own(req: Request) {
   return production!;
 }
 async function readiness() {
-  return { queueEnabled: env.STUDIO_QUEUE_ENABLED, storageConfigured: persistentStorageConfigured(), providerConfigured: Boolean(env.GEMINI_API_KEY), workerOnline: await studioWorkerOnline() };
+  return { queueEnabled: env.STUDIO_QUEUE_ENABLED, storageConfigured: persistentStorageConfigured(), providerConfigured: Boolean(env.GEMINI_API_KEY || env.OPENROUTER_API_KEY), workerOnline: await studioWorkerOnline() };
 }
 
 studioRouter.get("/config", wrap(async (req, res) => {
   const projects = await AIProject.find({ userId: req.user._id }).sort({ updatedAt: -1 }).limit(100).lean();
   const characters = await CharacterProfile.find({ userId: req.user._id }).lean();
-  res.json({ imageModels, videoModels, voiceModels: ttsModels, projects, characters, readiness: await readiness() });
+  res.json({ imageModels: await configuredModels("image", imageModels), videoModels: await configuredModels("video", videoModels), voiceModels: await configuredModels("voice", ttsModels), projects, characters, readiness: await readiness() });
 }));
 studioRouter.get("/productions", wrap(async (req, res) => {
   const query: any = { userId: req.user._id };

@@ -1,3 +1,4 @@
+import { providerFor } from "./openrouter.js";
 import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
 import { createQuote } from "./wallet.js";
 import { CreditPackage } from "../models/CreditPackage.js";
@@ -8,7 +9,7 @@ export async function priceStudioSteps(steps: StudioStep[]) {
   for (const step of steps) {
     if (step.reused) { step.credits = 0; continue; }
     const feature = step.kind === "image" ? "text_to_image" : step.kind === "audio" ? "voice_generation" : "image_to_video";
-    const provider = step.kind === "video" ? "google-veo" : "gemini";
+    const provider = providerFor(step.input.model);
     const unit = step.kind === "image" ? `image:${step.input.resolution}` : step.kind === "video" ? `second:${step.input.quality}` : "character";
     const rule = await GenerationPriceRule.findOne({ feature, provider, model: step.input.model, unit, active: true });
     if (!rule || rule.unit !== unit || !(rule.creditsPerUnit > 0) || !(rule.providerCostUsd > 0)) {

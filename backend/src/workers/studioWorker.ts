@@ -5,7 +5,7 @@ import { getStudioQueue, reconcileStudioQueue, studioRedisConnection } from "../
 import { runStudioProduction } from "../services/studioExecution.js";
 import { persistentStorageConfigured } from "../services/mediaStorage.js";
 
-if (!env.MONGODB_URI || !env.STUDIO_QUEUE_ENABLED || !persistentStorageConfigured() || !env.GEMINI_API_KEY) throw new Error("Studio requires MongoDB, Redis, Gemini, and private R2 storage configuration.");
+if (!env.MONGODB_URI || !env.STUDIO_QUEUE_ENABLED || !persistentStorageConfigured() || !(env.GEMINI_API_KEY || env.OPENROUTER_API_KEY)) throw new Error("Studio requires MongoDB, Redis, an AI gateway key, and private R2 storage configuration.");
 await mongoose.connect(env.MONGODB_URI);
 const queue = getStudioQueue();
 const client = await queue.client;

@@ -1,3 +1,5 @@
+import { isOpenRouter } from "./openrouter.js";
+import { createRouterVideo, pollRouterVideo, downloadRouterVideo } from "./openrouterVideo.js";
 import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { buildVeoPrompt, sceneAudioFields, segmentDialogue } from "./sceneAudio.js";
 import { z } from "zod";
@@ -5,9 +7,12 @@ import { inspectNativeVideo } from "./nativeAudio.js";
 import { withProvider } from "./platformControl.js";
 import { env } from "../config/env.js";
 
-export const videoModels = [
+const directVideoModels = [
   { id: "veo-3.1-generate-preview", label: "Veo 3.1", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4], qualities: ["720p", "1080p", "4K"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }
 ];
+
+const routerVideoModels = directVideoModels.map(m => ({ ...m, id: "openrouter/google/veo-3.1", label: "Veo 3.1 via OpenRouter", qualities: ["720p", "1080p"] }));
+export const videoModels = env.OPENROUTER_API_KEY ? [...routerVideoModels, ...directVideoModels] : [...directVideoModels, ...routerVideoModels];
 
 export function validateVideoSettings(input: any) {
   const model = videoModels.find((item) => item.id === input.model);
@@ -37,7 +42,7 @@ export function videoCreditCost(settings: any) {
   return Number(settings.quantity) * Math.ceil(Number(settings.durationSeconds) / 8) * qualityMultiplier * 6;
 }
 
-export async function createVeoOperation(settings: any) { return withProvider(settings.model, () => createVeoOperationUnchecked(settings)); }
+export async function createVeoOperation(settings: any) { return withProvider(settings.model, () => isOpenRouter(settings.model) ? createRouterVideo(settings) : createVeoOperationUnchecked(settings)); }
 async function createVeoOperationUnchecked(settings: any) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
   try {
@@ -58,6 +63,7 @@ function veoClient() {
   return new GoogleGenAI({ apiKey: env.GEMINI_API_KEY!, httpOptions: { timeout: 60000, retryOptions: { attempts: 1 } } });
 }
 export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 60 * 1000) {
+  if (operationName.startsWith("openrouter:")) return pollRouterVideo(operationName, timeoutMs) as Promise<any>;
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
   if (!/^(?:models\/[\w.-]+\/)?operations\/[\w.-]+$/.test(operationName)) throw new Error("Invalid provider operation name");
   const started = Date.now(), client = veoClient();
@@ -71,7 +77,8 @@ export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 6
   throw new Error("Veo generation timed out; existing operation can be resumed without submitting another generation");
 }
 
-export async function downloadVeoVideos(operation: any) {
+export async function downloadVeoVideos(operation: any, context?: { userId?: string }) {
+  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId);
   const samples = operation.response?.generateVideoResponse?.generatedSamples ?? operation.response?.generatedVideos ?? [];
   const outputs: { buffer: Buffer; contentType: string; metadata: any }[] = [];
   for (const sample of samples) {

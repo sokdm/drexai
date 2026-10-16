@@ -1,3 +1,4 @@
+import { isOpenRouter } from "./openrouter.js";
 import { checkGenerationUser, assertProviderBudget } from "./platformControl.js";
 import { ProviderControl } from "../models/Admin.js";
 import mongoose from "mongoose";
@@ -50,6 +51,7 @@ export async function creditPurchase({ userId, credits, idempotencyKey, metadata
 
 export async function createQuote(input: any) {
   const rule = await GenerationPriceRule.findOne({ feature: input.feature, provider: input.provider, model: input.model, active: true, ...(input.unit ? { unit: input.unit } : {}), ...(input.ruleId ? { _id: input.ruleId } : {}) });
+  if (isOpenRouter(input.model) && (!rule || !(rule.providerCostUsd > 0))) return { allowed: false, credits: 0, reason: "Configure verified OpenRouter provider pricing before generating." };
   if (!rule) return { allowed: false, credits: 0, reason: "Pricing is not active until provider costs are verified." };
   const quantity = Math.max(1, Number(input.quantity ?? 1));
   const credits = Math.ceil(rule.creditsPerUnit * quantity);

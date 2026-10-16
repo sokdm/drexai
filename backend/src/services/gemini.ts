@@ -1,3 +1,4 @@
+import { isOpenRouter, routerText } from "./openrouter.js";
 import { sceneAudioFields } from "./sceneAudio.js";
 import { geminiFetch } from "./geminiRequest.js";
 import { geminiSchema } from "./geminiSchema.js";
@@ -53,7 +54,7 @@ export const scriptProjectSchema = z.object({
 });
 
 export function assertGeminiReady() {
-  if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+  if (!env.GEMINI_API_KEY && !env.OPENROUTER_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 }
 
 export async function geminiJson<T>(input: {
@@ -62,10 +63,11 @@ export async function geminiJson<T>(input: {
   schema: z.ZodSchema<T>;
   model?: string;
   maxOutputTokens?: number;
+  userId?: string;
 }) {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
-  const raw = await withProvider(selectedModel, () => withRetry(async () => {
+  const raw = await withProvider(selectedModel, () => isOpenRouter(selectedModel) ? routerText({ ...input, model: selectedModel }) : withRetry(async () => {
     const response = await geminiFetch(GEMINI_URL, {
       method: "POST",
       signal: AbortSignal.timeout(90000),
@@ -88,10 +90,10 @@ export async function geminiJson<T>(input: {
   return result.data;
 }
 
-export async function geminiText(input: { system: string; prompt: string; maxOutputTokens?: number; model?: string }) {
+export async function geminiText(input: { system: string; prompt: string; maxOutputTokens?: number; model?: string; userId?: string }) {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
-  return withProvider(selectedModel, () => withRetry(async () => {
+  return withProvider(selectedModel, () => isOpenRouter(selectedModel) ? routerText({ ...input, model: selectedModel }) : withRetry(async () => {
     const response = await geminiFetch(GEMINI_URL, {
       method: "POST",
       signal: AbortSignal.timeout(90000),

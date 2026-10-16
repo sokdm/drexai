@@ -1,3 +1,4 @@
+import { providerFor } from "../services/openrouter.js";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -18,9 +19,9 @@ const id = z.string().regex(/^[a-f0-9]{24}$/i);
 const settingsSchema = z.discriminatedUnion("kind", [z.object({ kind: z.literal("shorts"), count: z.number().int().min(5).max(20), sizeBytes: z.number().int().min(100).max(1024 * 1024 * 1024), name: z.string().trim().min(1).max(150) }), z.object({ kind: z.literal("avatar"), presenterId: z.string().min(1).max(200), script: z.string().trim().min(5).max(2500), ratio: z.enum(["16:9", "9:16"]), name: z.string().trim().min(1).max(150), consent: z.literal(true) })]);
 async function quoteFor(settings: z.infer<typeof settingsSchema>) {
   const avatar = settings.kind === "avatar";
-  return createQuote({ feature: avatar ? "talking_avatar" : "short_clip_analysis", provider: avatar ? "heygen" : "gemini", model: avatar ? "heygen-avatar" : await defaultModel("text", env.GEMINI_MODEL), unit: "request", quantity: 1 });
+  return createQuote({ feature: avatar ? "talking_avatar" : "short_clip_analysis", provider: avatar ? "heygen" : providerFor(await defaultModel("short_clip_analysis", await defaultModel("text", env.GEMINI_MODEL))), model: avatar ? "heygen-avatar" : await defaultModel("short_clip_analysis", await defaultModel("text", env.GEMINI_MODEL)), unit: "request", quantity: 1 });
 }
-creativeRouter.get("/config", wrap(async (req: any, res: any) => res.json({ storageConfigured: persistentStorageConfigured(), analysisConfigured: !!env.GEMINI_API_KEY, avatarConfigured: !!env.HEYGEN_API_KEY, workerOnline: !!await RenderWorker.exists({ _id: "creative", expiresAt: { $gt: new Date() } }), maxSourceBytes: 1024 * 1024 * 1024, maxDuration: 3600, presenters: availablePresenters(req.user.email).map(p => ({ id: p.id, name: p.name, personal: !!p.ownerEmail })) })));
+creativeRouter.get("/config", wrap(async (req: any, res: any) => res.json({ storageConfigured: persistentStorageConfigured(), analysisConfigured: !!(env.GEMINI_API_KEY || env.OPENROUTER_API_KEY), avatarConfigured: !!env.HEYGEN_API_KEY, workerOnline: !!await RenderWorker.exists({ _id: "creative", expiresAt: { $gt: new Date() } }), maxSourceBytes: 1024 * 1024 * 1024, maxDuration: 3600, presenters: availablePresenters(req.user.email).map(p => ({ id: p.id, name: p.name, personal: !!p.ownerEmail })) })));
 creativeRouter.get("/jobs", wrap(async (req: any, res: any) => res.json({ jobs: await CreativeJob.find({ userId: req.user._id }).select("-quote -leaseToken -sourceKey -options.voiceId").sort({ createdAt: -1 }).limit(50) })));
 creativeRouter.post("/quote", wrap(async (req: any, res: any) => { const settings = settingsSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, settings, await quoteFor(settings)) }); }));
 creativeRouter.post("/jobs", wrap(async (req: any, res: any) => {
@@ -30,7 +31,7 @@ creativeRouter.post("/jobs", wrap(async (req: any, res: any) => {
   if (await CreativeJob.countDocuments({ userId: req.user._id, status: { $in: ["uploading", "queued", "processing", "provider_pending"] } }) >= 2) return res.status(429).json({ error: "Finish or cancel an existing creative job first" });
   let presenter;
   if (settings.kind === "avatar") { presenter = availablePresenters(req.user.email).find(p => p.id === settings.presenterId); if (!env.HEYGEN_API_KEY || !presenter) return res.status(400).json({ error: "Select an available authorized presenter" }); }
-  else if (!env.GEMINI_API_KEY) return res.status(503).json({ error: "Gemini video analysis is not configured" });
+  else if (!env.GEMINI_API_KEY && !env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Configure the AI gateway for video analysis" });
   const quote = await approvedTerms(req.user._id, settings, approvedCredits, () => quoteFor(settings));
   if (!quote.allowed || quote.credits !== approvedCredits) throw new Error("Review and approve the current quote first");
   const reservation = await reserveCredits(String(req.user._id), quote, "creative:" + randomUUID());

@@ -41,3 +41,7 @@ Native captions require a creator-reviewed actual audio transcript, or manual ca
 For authorized live verification, build then run `NATIVE_VEO_LIVE_TEST=true node backend/scripts/test-native-veo.mjs` from the repository root (PowerShell: set `$env:NATIVE_VEO_LIVE_TEST='true'` first). This checks model access, then submits at most three eight-second 720p clips: one speaker, alternating speakers and ambience. It checkpoints operation IDs, does not repeat uncertain submissions, never retries paid generation, and stores ignored local artifacts. Human playback review is still required to assess actual dialogue and mouth synchronization. No live pass is claimed merely from local fixtures or a detected audio stream.
 
 Provider capabilities verified against [Google's Veo documentation](https://ai.google.dev/gemini-api/docs/veo). Language/accent and voice consistency remain provider-dependent; native audio does not guarantee exact words or perfect lip-sync.
+
+## Gateway routing update
+
+[OpenRouter migration](OPENROUTER.md) adds an optional primary gateway for Veo native audiovisual requests. Selected OpenRouter jobs use its asynchronous video API and persist openrouter-prefixed operation IDs. Legacy direct Veo jobs continue through the Google SDK. Native sound inspection, human review, narration-only TTS billing and FFmpeg sound preservation are unchanged.

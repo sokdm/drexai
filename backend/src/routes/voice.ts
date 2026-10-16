@@ -1,3 +1,4 @@
+import { providerFor } from "../services/openrouter.js";
 import { configuredModels } from "../services/platformControl.js";
 import { managedPrice, rememberQuote, approvedTerms } from "../services/managedPricing.js";
 import { Router } from "express";
@@ -35,7 +36,7 @@ voiceRouter.get("/config", async (req, res) => {
 voiceRouter.post("/quote", async (req, res, next) => {
   try {
     const settings = validateTtsSettings(requestSchema.partial({ approvedCredits: true }).parse(req.body));
-    res.json({ quote: { ...(await rememberQuote(req.user._id, settings, await managedPrice("voice_generation", "gemini", settings, ttsCreditCost(settings)))), settings } });
+    res.json({ quote: { ...(await rememberQuote(req.user._id, settings, await managedPrice("voice_generation", providerFor(settings.model), settings, ttsCreditCost(settings)))), settings } });
   } catch (error) { next(error); }
 });
 
@@ -44,15 +45,15 @@ voiceRouter.post("/generate", async (req, res, next) => {
   let job: any;
   try {
     const settings = validateTtsSettings(requestSchema.parse(req.body));
-    const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("voice_generation", "gemini", settings, ttsCreditCost(settings)));
+    const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("voice_generation", providerFor(settings.model), settings, ttsCreditCost(settings)));
     const credits = terms.credits;
     if (settings.approvedCredits !== credits) return res.status(400).json({ error: `Approve ${credits} credits before generating.` });
     reservation = await reserveCredits(String(req.user._id), terms, `voice:${req.user._id}:${Date.now()}:${(settings.text ?? "").slice(0, 24)}`);
-    job = await AudioGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: "gemini", status: "processing", attempts: 1, approvedCredits: credits });
-    const output = await generateGeminiSpeech(settings);
+    job = await AudioGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(settings.model), status: "processing", attempts: 1, approvedCredits: credits });
+    const output = await generateGeminiSpeech({ ...settings, userId: String(req.user._id) });
     const key = `${req.user._id}/audio/${job._id}.wav`;
     const stored = await uploadAudio(output.buffer, key, output.contentType);
-    const asset = await MediaAsset.create({ userId: req.user._id, projectId: settings.projectId, sceneId: settings.sceneId, characterName: settings.characterName, voiceId: settings.voiceId, jobId: job._id, type: "audio", prompt: settings.text, provider: "gemini", model: settings.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, durationSeconds: output.durationSeconds, metadata: { style: settings.style, mode: settings.mode } });
+    const asset = await MediaAsset.create({ userId: req.user._id, projectId: settings.projectId, sceneId: settings.sceneId, characterName: settings.characterName, voiceId: settings.voiceId, jobId: job._id, type: "audio", prompt: settings.text, provider: providerFor(settings.model), model: settings.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, durationSeconds: output.durationSeconds, metadata: { style: settings.style, mode: settings.mode } });
     job.status = "completed"; job.durationSeconds = output.durationSeconds; job.outputMetadata = { assetId: asset._id }; job.completedAt = new Date();
     await job.save();
     await settleReservation(String(reservation._id));

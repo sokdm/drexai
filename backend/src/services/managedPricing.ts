@@ -1,3 +1,4 @@
+import { isOpenRouter } from "./openrouter.js";
 import { assertProviderBudget } from "./platformControl.js";
 import { createHash } from "node:crypto";
 import { randomToken } from "../utils/crypto.js";
@@ -8,6 +9,7 @@ export async function managedPrice(feature: string, provider: string, settings: 
   const unit = feature === "text_to_image" ? `image:${settings.resolution}` : feature === "image_to_video" ? `second:${settings.quality}` : "character";
   const quantity = feature === "text_to_image" ? settings.numberOfImages : feature === "image_to_video" ? settings.quantity * settings.durationSeconds : settings.mode === "multi" ? settings.speakers.map((s: any) => s.text).join(" ").length : settings.text.length;
   const rule = await GenerationPriceRule.findOne({ feature, provider, model: settings.model, unit }).sort({ createdAt: -1 });
+  if (isOpenRouter(settings.model) && (!rule || !(rule.providerCostUsd > 0))) throw new Error("Configure verified OpenRouter pricing in Admin before quoting this model. Existing direct models remain available.");
   if (rule && !rule.active) throw new Error("Pricing for this model is disabled.");
   const control = await ProviderControl.findOne({ model: settings.model }); if (control && !control.enabled) throw new Error("This model is disabled.");
   const estimate = rule && rule.providerCostUsd > 0 ? rule.providerCostUsd * quantity : null;

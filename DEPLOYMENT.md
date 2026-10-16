@@ -110,3 +110,7 @@ References: [Google production policies](https://developers.google.com/identity/
 Create/review active admin pricing rules for clip analysis, avatars and any newly enabled provider models. No automatic deduction-by-duration redesign was added in this deployment work. Short clips require the creative worker plus Gemini; avatars additionally require actual authorized HeyGen presenter/voice IDs. Unsupported TikTok/Meta direct posting remains unavailable.
 
 Before inviting users: check signup/email OTP, admin OTP, test payment and webhook crediting, queue heartbeats, one small image/video job, save/resume of an edit, and a real R2 MP4 export. Then test the long-video path at increasing sizes. Provider keys, configured URLs and passing mocked tests alone do not prove a live end-to-end deployment.
+
+## OpenRouter gateway
+
+See [OpenRouter migration and Render setup](docs/OPENROUTER.md). Add OPENROUTER_API_KEY to the web and AI workers, configure verified provider cost estimates and credit rules in Admin, then select feature models. Preserve direct Gemini and HeyGen keys until live replacement tests pass.

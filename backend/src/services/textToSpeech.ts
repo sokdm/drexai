@@ -1,13 +1,18 @@
+import { isOpenRouter, routerSpeech } from "./openrouter.js";
 import { withProvider } from "./platformControl.js";
 import { env } from "../config/env.js";
 
-export const ttsModels = [
+const directTtsModels = [
   { id: "gemini-3.8-flash-tts", label: "Gemini 3.8 Flash TTS", multiSpeaker: true, voices: ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"], styles: ["calm", "cinematic", "warm narrator", "dramatic", "whispered", "energetic", "documentary"], languages: ["English", "Spanish", "French", "Portuguese", "Hindi", "Arabic", "Yoruba"] },
   { id: "gemini-3.8-flash-lite-tts", label: "Gemini 3.8 Flash-Lite TTS", multiSpeaker: true, voices: ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda"], styles: ["calm", "friendly", "fast", "slow", "dramatic"], languages: ["English", "Spanish", "French", "Portuguese"] }
 ];
 
+const routerTtsModels = directTtsModels.map(m => ({ ...m, id: "openrouter/google/" + m.id, label: m.label + " via OpenRouter" }));
+export const ttsModels = env.OPENROUTER_API_KEY ? [...routerTtsModels, ...directTtsModels] : [...directTtsModels, ...routerTtsModels];
+
 export function validateTtsSettings(input: any) {
-  const model = ttsModels.find((item) => item.id === input.model) ?? ttsModels[0];
+  const model = ttsModels.find((item) => item.id === input.model);
+  if (!model) throw new Error("Unsupported speech model");
   if (!model.voices.includes(input.voiceId)) throw new Error("Unsupported voice for selected model");
   if (!model.languages.includes(input.language)) throw new Error("Unsupported language for selected model");
   if (input.mode === "multi" && !model.multiSpeaker) throw new Error("Selected model does not support multi-speaker dialogue");
@@ -20,7 +25,7 @@ export function ttsCreditCost(settings: any) {
   return Math.max(1, Math.ceil(chars / 600));
 }
 
-export async function generateGeminiSpeech(settings: any) { return withProvider(settings.model, () => generateGeminiSpeechUnchecked(settings)); }
+export async function generateGeminiSpeech(settings: any) { return withProvider(settings.model, () => isOpenRouter(settings.model) ? routerSpeech(settings) : generateGeminiSpeechUnchecked(settings)); }
 async function generateGeminiSpeechUnchecked(settings: any) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
   const isMulti = settings.mode === "multi" && settings.speakers?.length;

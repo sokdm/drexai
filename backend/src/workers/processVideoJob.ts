@@ -22,7 +22,7 @@ export async function processVideoJob(jobId: string) {
     const operation = await pollVeoOperation(operationName);
     job.progress = 80;
     await job.save();
-    const outputs = await downloadVeoVideos(operation);
+    const outputs = await downloadVeoVideos(operation, { userId: String(job.userId) });
     const assets = [];
     for (let index = 0; index < outputs.length; index += 1) {
       const output = outputs[index];

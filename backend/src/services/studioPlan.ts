@@ -1,3 +1,4 @@
+import { env } from "../config/env.js";
 import { sceneDialogue, segmentDialogue, needsNarration } from "./sceneAudio.js";
 import { z } from "zod";
 import { imageModels, validateImageSettings } from "./imageGeneration.js";
@@ -5,9 +6,9 @@ import { videoModels, validateVideoSettings, planClipDurations } from "./videoGe
 import { ttsModels, validateTtsSettings } from "./textToSpeech.js";
 
 export const studioSettingsSchema = z.object({
-  imageModel: z.string().default(imageModels[0].id),
-  videoModel: z.string().default(videoModels[0].id),
-  voiceModel: z.string().default(ttsModels[0].id),
+  imageModel: z.string().default(env.OPENROUTER_API_KEY ? imageModels[0].id : imageModels.find(m => !m.id.startsWith("openrouter/"))!.id),
+  videoModel: z.string().default(env.OPENROUTER_API_KEY ? videoModels[0].id : videoModels.find(m => !m.id.startsWith("openrouter/"))!.id),
+  voiceModel: z.string().default(env.OPENROUTER_API_KEY ? ttsModels[0].id : ttsModels.find(m => !m.id.startsWith("openrouter/"))!.id),
   aspectRatio: z.enum(["16:9", "9:16"]).default("16:9"),
   resolution: z.string().default("1K"),
   quality: z.string().default("720p"),

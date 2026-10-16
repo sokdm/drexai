@@ -1,17 +1,22 @@
+import { isOpenRouter, routerImages } from "./openrouter.js";
 import { geminiFetch } from "./geminiRequest.js";
 import { withProvider } from "./platformControl.js";
 import { env } from "../config/env.js";
 
-export const imageModels = [
+const directImageModels = [
   { id: "gemini-nano-banana-2.1", label: "Nano Banana 2.1", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 4, characterReference: true },
   { id: "gemini-3.1-flash-lite-image", label: "Nano Banana 2 Lite", aspectRatios: ["1:1", "16:9", "9:16"], resolutions: ["1K"], maxImages: 4, characterReference: false },
   { id: "gemini-3-pro-image", label: "Nano Banana Pro", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 2, characterReference: true }
 ];
 
+const routerImageModels = directImageModels.map(m => ({ ...m, id: "openrouter/google/" + m.id, label: m.label + " via OpenRouter" }));
+export const imageModels = env.OPENROUTER_API_KEY ? [...routerImageModels, ...directImageModels] : [...directImageModels, ...routerImageModels];
+
 export const stylePresets = ["Cinematic", "Anime", "Photoreal", "3D animation", "Documentary", "Editorial", "Concept art"];
 
 export function validateImageSettings(input: any) {
-  const model = imageModels.find((item) => item.id === input.model) ?? imageModels[0];
+  const model = imageModels.find((item) => item.id === input.model);
+  if (!model) throw new Error("Unsupported image model");
   if (!model.aspectRatios.includes(input.aspectRatio)) throw new Error("Unsupported aspect ratio for selected model");
   if (!model.resolutions.includes(input.resolution)) throw new Error("Unsupported resolution for selected model");
   const count = Number(input.numberOfImages ?? 1);
@@ -27,7 +32,7 @@ export function imageCreditCost(settings: any) {
   return Number(settings.numberOfImages) * resolutionMultiplier * modelMultiplier;
 }
 
-export async function generateGeminiImages(settings: any) { return withProvider(settings.model, () => generateGeminiImagesUnchecked(settings)); }
+export async function generateGeminiImages(settings: any) { return withProvider(settings.model, () => isOpenRouter(settings.model) ? routerImages(settings) : generateGeminiImagesUnchecked(settings)); }
 async function generateGeminiImagesUnchecked(settings: any) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
   const prompt = `${settings.prompt}\nStyle: ${settings.stylePreset || "natural"}\nAspect ratio: ${settings.aspectRatio}\nResolution: ${settings.resolution}`;

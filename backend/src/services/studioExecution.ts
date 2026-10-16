@@ -1,3 +1,4 @@
+import { providerFor } from "./openrouter.js";
 import { inspectNativeVideo } from "./nativeAudio.js";
 import { assertProviderBudget, checkGenerationUser } from "./platformControl.js";
 import { randomUUID } from "node:crypto";
@@ -102,7 +103,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           }
         }
         if (!output) {
-          const input = { ...step.input };
+          const input: any = { ...step.input, userId: String(production.userId) };
           if (step.kind === "image") {
             input.referenceImages = [];
             for (const ref of input.characterReferenceIds ?? []) {
@@ -128,7 +129,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           } else {
             if (!step.providerJobId) { step.providerJobId = await providers.createVideo(input); await checkpoint(); }
             const operation = await providers.pollVideo(step.providerJobId);
-            const videos = await providers.downloadVideo(operation);
+            const videos = await providers.downloadVideo(operation, { userId: String(production.userId) });
             const native = videos[0].metadata;
             if (step.input.nativeAudio && (!native?.nativeAudio || Math.abs(Number(native.durationSeconds) - step.input.durationSeconds) > 0.5)) throw Object.assign(new Error("Generated native audiovisual clip is incomplete or has an unexpected duration. Review and regenerate with a new quote."), { mediaRejected: true });
             output = { ...videos[0], durationSeconds: native?.durationSeconds ?? step.input.durationSeconds, providerUsage: { ...((operation.response as any)?.usageMetadata ?? {}), ...native } };
@@ -148,7 +149,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         await checkpoint();
         asset = await MediaAsset.findOneAndUpdate({ productionId: production._id, productionStepKey: step.key, userId: production.userId }, { $setOnInsert: {
           projectId: production.projectId, jobId: production._id, sceneId: step.sceneId, type: step.kind,
-          provider: step.kind === "video" ? "google-veo" : "gemini", model: step.input.model,
+          provider: providerFor(step.input.model), model: step.input.model,
           prompt: step.input.prompt ?? step.input.text ?? step.input.motionPrompt, voiceId: step.input.voiceId,
           characterName: step.input.speaker, ...stored, contentType: output.contentType,
           sizeBytes: output.buffer.length, durationSeconds: output.durationSeconds,
