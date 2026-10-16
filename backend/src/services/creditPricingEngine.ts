@@ -44,6 +44,7 @@ export async function estimateRouterCost(input: any, policy: any) {
     for (const [key, expected] of Object.entries(override.settings || {})) if (settings[key] !== expected) throw new Error("Verified pricing override does not cover these settings");
     return { cost: new Decimal(override.costUsd!).mul(quantity), source: "verified-admin-override", verifiedAt: override.verifiedAt, sourceUrl: override.verificationUrl, limits: { maxInputTokens: policy.maxInputTokens, maxOutputTokens: policy.maxOutputTokens } };
   }
+  if (input.feature === "full_video_transcription") throw new Error("Add a verified per-minute full_video_transcription pricing override for a timestamp-capable OpenRouter STT model before enabling full transcription.");
   const published = await routerPricing(input.model, kind), limits = { maxInputTokens: policy.maxInputTokens, maxOutputTokens: policy.maxOutputTokens };
   if (kind === "text") {
     const boundedMotionImage = input.feature === "ai_motion_prompt" && input.model === "openrouter/openai/gpt-4.1-mini" && settings.boundedImage === true;
@@ -93,7 +94,7 @@ export async function quoteAutomaticCredits(input: any) {
     estimate = await estimateRouterCost(input, values);
   }
   const requestLimits: any = { ...estimate.limits }, candidates: any[] = [];
-  if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt"].includes(input.feature)) {
+  if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt", "full_video_transcription"].includes(input.feature)) {
     const model = "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
     if (model !== input.model) try {
       const record = await verifiedRouterModel(model, "text");

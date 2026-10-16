@@ -91,3 +91,20 @@ test("legacy missing or malformed administrator hashes cannot crash password ver
   const response = await request("/api/admin/login", { email: "damaged-admin@example.test", password: "password" });
   assert.equal(response.status, 401); assert.equal(JSON.stringify(response.data).includes("pchstr"), false);
 });
+
+test("full-source transcription extracts every chunk, offsets provider timestamps and records real gateway usage fields", async () => {
+ const { transcribeSource } = await import("../dist/services/transcription.js");
+ const file = path.join(directory, "full-transcript-source.wav");
+ await runMedia("ffmpeg", ["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=75", file]);
+ const previous = globalThis.fetch, priorKey = env.OPENROUTER_API_KEY; let calls = 0;
+ env.OPENROUTER_API_KEY = "test-only";
+ globalThis.fetch = async (url, options) => {
+  if (String(url) === "https://openrouter.ai/api/v1/models") return new Response(JSON.stringify({ data: [{ id: "openai/whisper-large-v3", architecture: { output_modalities: ["transcription"] } }] }));
+  if (String(url).endsWith("/audio/transcriptions")) { calls++; const body = JSON.parse(options.body); assert.equal(body.response_format, "verbose_json"); assert.ok(body.input_audio.data.length > 100); return new Response(JSON.stringify({ text: "Actual spoken words", segments: [{ start: 0, end: 1, text: "Actual spoken words" }], usage: { seconds: calls === 1 ? 60 : 15, cost: .001 } }), { headers: { "x-generation-id": `transcript-test-${calls}` } }); }
+  return previous(url, options);
+ };
+ try {
+  const progress = [], result = await transcribeSource(file, 75, directory, { allowed: true, feature: "full_video_transcription", model: "openrouter/openai/whisper-large-v3", estimatedCostUsd: .02 }, String(user._id), async n => { progress.push(n); });
+  assert.equal(calls, 2); assert.equal(result.segments[1].start, 60); assert.equal(result.segments[1].end, 61); assert.equal(progress.at(-1), 1);
+ } finally { globalThis.fetch = previous; env.OPENROUTER_API_KEY = priorKey; }
+});

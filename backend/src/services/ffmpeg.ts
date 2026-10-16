@@ -4,12 +4,13 @@ import { writeFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { EditorTimeline, ExportSettings, outputDimensions, timelineDuration, trackStart } from "@drex/shared";
 import { env } from "../config/env.js";
+import { effectValues } from "@drex/shared";
 
 const require = createRequire(import.meta.url);
 export function mediaBinary(tool: "ffmpeg" | "ffprobe"): string {
   return tool === "ffmpeg" ? env.FFMPEG_PATH || require("ffmpeg-static") : env.FFPROBE_PATH || require("ffprobe-static").path;
 }
-export function runMedia(tool: "ffmpeg" | "ffprobe", args: string[], options: { cwd?: string; signal?: AbortSignal; onProgress?: (seconds: number) => void; timeoutMs?: number; includeStderr?: boolean } = {}): Promise<string> {
+export function runMedia(tool: "ffmpeg" | "ffprobe", args: string[], options: { cwd?: string; signal?: AbortSignal; onProgress?: (seconds: number) => void; timeoutMs?: number; includeStderr?: boolean; stderrLimit?: number } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(mediaBinary(tool), args, { cwd: options.cwd, windowsHide: true, shell: false, signal: options.signal, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", progress = "";
@@ -19,7 +20,7 @@ export function runMedia(tool: "ffmpeg" | "ffprobe", args: string[], options: { 
       progress += chunk.toString(); const lines = progress.split(/\r?\n/); progress = lines.pop() ?? "";
       for (const line of lines) if (line.startsWith("out_time_us=")) { const value = Number(line.slice(12)); if (Number.isFinite(value)) options.onProgress?.(value / 1000000); }
     });
-    child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-8000); });
+    child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-(options.stderrLimit ?? 8000)); });
     child.on("error", error => { clearTimeout(timer); reject(error); });
     child.on("close", code => { clearTimeout(timer); code === 0 ? resolve(options.includeStderr ? stdout + "\n" + stderr : stdout) : reject(new Error(`${tool} failed (${code}): ${stderr.slice(-2000)}`)); });
   });
@@ -67,7 +68,8 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
     else args.push("-ss", String(clip.sourceIn), "-i", file!);
     const scale = clip.fit === "cover" ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:(iw-ow)*${clip.cropX ?? 0.5}:(ih-oh)/2` : `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     const fade = Math.min(0.3, clip.duration / 3);
-    const filters = `${scale},setsar=1,fps=30,format=yuv420p,setpts=PTS-STARTPTS${clip.transition === "fade" ? `,fade=t=in:st=0:d=${fade},fade=t=out:st=${clip.duration - fade}:d=${fade}` : ""}`;
+    const effects = effectValues(clip);
+    const filters = `${scale},setsar=1,fps=30,format=yuv420p,setpts=PTS-STARTPTS,eq=brightness=${effects.brightness}:contrast=${effects.contrast}:saturation=${effects.saturation}${effects.sharpen ? `,unsharp=5:5:${effects.sharpen}` : ""}${effects.vignette ? ",vignette=PI/5" : ""}${clip.transition === "fade" ? `,fade=t=in:st=0:d=${fade},fade=t=out:st=${clip.duration - fade}:d=${fade}` : ""}`;
     const segment = `segment-${i}.mp4`; segments.push(segment);
     const frames = Math.max(1, Math.round((elapsed + clip.duration) * 30) - Math.round(elapsed * 30)); elapsed += clip.duration;
     args.push("-frames:v", String(frames), "-vf", filters, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", segment);

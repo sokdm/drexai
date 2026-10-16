@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto";
 import { timelineSchema, timelineDuration, type EditorTimeline } from "@drex/shared";
 export function editingCommand(input: EditorTimeline, message: string, captions: any[] = []) {
  const timeline = timelineSchema.parse(structuredClone(input)), text = message.trim().toLowerCase(); let result: EditorTimeline = timeline, explanation = "";
- if (/cinematic|silent|silence|filter|effect|speed/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made. You can apply fades, titles, captions and vertical cuts using supported commands.");
- if (/transition/.test(text)) {
+ if (/silent|silence|speed/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made.");
+ if (/cinematic|monochrome|black and white|vivid|warm|cool|vignette|sharpen|reset effects/.test(text)) {
+  const look = /reset effects/.test(text) ? "original" : /monochrome|black and white/.test(text) ? "monochrome" : /vivid/.test(text) ? "vivid" : /warm/.test(text) ? "warm" : /cool/.test(text) ? "cool" : /cinematic/.test(text) ? "cinematic" : undefined;
+  result.clips = result.clips.map(c => ({ ...c, ...(look ? { look, brightness: undefined, contrast: undefined, saturation: undefined } : {}), ...(/vignette/.test(text) ? { vignette: true } : {}), ...(/sharpen/.test(text) ? { sharpen: .6 } : {}), ...(/reset effects/.test(text) ? { sharpen: 0, vignette: false } : {}) }));
+  explanation = "Updated clip color/effect settings. Preview the color changes and export through FFmpeg to render sharpening and vignette.";
+ } else if (/transition/.test(text)) {
   result.clips = result.clips.map((clip, i) => ({ ...clip, transition: i === result.clips.length - 1 ? "cut" : "fade" }));
   explanation = "Applied supported fade transitions. Color grading and cinematic effects were not added.";
  } else if (/caption|subtitle/.test(text)) {

@@ -17,6 +17,13 @@ import { MediaAsset } from "../models/MediaAsset.js";
 import { persistentStorageConfigured, signedImageUrl, openMediaStream } from "../services/mediaStorage.js";
 import { roughCut, validateTimelineAssets, editorFail, editorAssetUrl, uploadEditorAudio, editingSuggestions, captionsFromTranscript } from "../services/videoEditing.js";
 import { env } from "../config/env.js";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { editorAssetBytes } from "../services/videoEditing.js";
+import { renderTimeline, runMedia } from "../services/ffmpeg.js";
+import { speechRanges, retainTimelineRanges } from "../services/silenceEditing.js";
+import { withProvider } from "../services/platformControl.js";
 
 export const editorRouter = Router();
 editorRouter.use(requireAuth, requireCsrf, rateLimit({ windowMs: 60000, limit: 180, standardHeaders: true, legacyHeaders: false }));
@@ -65,11 +72,30 @@ editorRouter.put("/edits/:id", wrap(async (req, res) => {
   res.json({ edit: updated });
 }));
 editorRouter.post("/edits/:id/suggestions", wrap(async (req, res) => { await own(req); const timeline = timelineSchema.parse(req.body.timeline); res.json({ suggestions: editingSuggestions(timeline), note: "Rule-based editing recommendations; review before applying." }); }));
-editorRouter.post("/edits/:id/command", wrap(async (req, res) => {
+editorRouter.post("/edits/:id/command", rateLimit({ windowMs: 60000, limit: 6 }), wrap(async (req, res) => {
  const edit = await own(req), input = z.object({ message: z.string().min(3).max(1000), timeline: timelineSchema, revision: z.number().int().nonnegative() }).parse(req.body);
  if (input.revision !== edit.revision) editorFail("This edit changed in another tab. Reload before applying a command.", 409);
  const assets = await validateTimelineAssets(input.timeline, String(req.user._id));
- const result = editingCommand(input.timeline, input.message, captionsFromTranscript(input.timeline, assets));
+ const result = /silent|silence/i.test(input.message) ? await withProvider("ffmpeg", async () => {
+   await checkGenerationUser(String(req.user._id));
+   const total = input.timeline.clips.reduce((n, c) => n + c.duration, 0);
+   if (!total || total > 300) editorFail("Silence analysis currently supports edits up to five minutes. Split longer edits first.");
+   const directory = await mkdtemp(path.join(tmpdir(), "drex-silence-"));
+   try {
+     const sources = new Map<string, string>();
+     let sourceBytes = 0;
+     for (const asset of assets) {
+       if ((asset.sizeBytes || 0) > 250 * 1024 * 1024) editorFail("Source exceeds the silence analysis size limit");
+       const bytes = await editorAssetBytes(asset); sourceBytes += bytes.length;
+       if (bytes.length > 250 * 1024 * 1024 || sourceBytes > 500 * 1024 * 1024) editorFail("Sources exceed the silence analysis size limit");
+       const file = path.join(directory, String(asset._id)); await writeFile(file, bytes); sources.set(String(asset._id), file);
+     }
+     const rendered = await renderTimeline(input.timeline, { format: "mp4", resolution: "480p", quality: "draft", filename: "silence-analysis" }, sources, directory);
+     const log = await runMedia("ffmpeg", ["-hide_banner", "-nostdin", "-i", rendered.file, "-vn", "-af", "silencedetect=noise=-35dB:d=0.6", "-f", "null", "-"], { includeStderr: true, stderrLimit: 2 * 1024 * 1024 });
+     const ranges = speechRanges(log, total), timeline = retainTimelineRanges(input.timeline, ranges);
+     return { timeline, explanation: `Removed ${(total - timeline.clips.reduce((n, c) => n + c.duration, 0)).toFixed(2)} seconds below -35 dB lasting at least 0.6 seconds, preserving 0.12-second handles. All audio and captions were cut with the video. Music can mask silence; review and undo if needed.` };
+   } finally { await rm(directory, { recursive: true, force: true }); }
+ }) : editingCommand(input.timeline, input.message, captionsFromTranscript(input.timeline, assets));
  await validateTimelineAssets(result.timeline, String(req.user._id));
  // Return a revision-bound proposal; the existing undo/save workflow owns commit.
  res.json({ ...result, revision: edit.revision, note: "Applied to the editor preview. Undo or save this change using the existing timeline controls. No AI provider request or credit charge was made." });

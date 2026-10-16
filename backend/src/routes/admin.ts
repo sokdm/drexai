@@ -107,9 +107,9 @@ adminRouter.use(adminOperationsRouter);
 adminRouter.use("/support", supportRouter);
 adminRouter.use("/feedback", feedbackRouter);
 
-const gatewayFeatures: Record<string, "text" | "image" | "video" | "voice"> = { text: "text", ai_research_chat: "text", ai_channel_analysis: "text", story_generation: "text", publishing_optimization: "text", short_clip_analysis: "text", image: "image", video: "video", voice: "voice" };
+const gatewayFeatures: Record<string, "text" | "image" | "video" | "voice" | "transcription"> = { text: "text", ai_research_chat: "text", ai_channel_analysis: "text", story_generation: "text", publishing_optimization: "text", short_clip_analysis: "text", full_video_transcription: "transcription", image: "image", video: "video", voice: "voice" };
 adminRouter.get("/gateway-pricing", wrap(async (req: any, res: any) => {
- const input = z.object({ model: z.string().max(100), kind: z.enum(["text", "image", "video", "voice"]) }).parse(req.query);
+ const input = z.object({ model: z.string().max(100), kind: z.enum(["text", "image", "video", "voice", "transcription"]) }).parse(req.query);
  res.json(await routerPricing(input.model, input.kind));
 }));
 adminRouter.put("/gateway-binding", wrap(async (req: any, res: any) => {

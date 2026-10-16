@@ -18,7 +18,7 @@ const gatewayUsageSchema = new Schema({ model: String, userId: Schema.Types.Obje
 gatewayUsageSchema.index({ requestId: 1, kind: 1 }, { unique: true, partialFilterExpression: { requestId: { $type: "string" } } });
 export const GatewayUsage = model("GatewayUsage", gatewayUsageSchema);
 const cache = new Map<string, { expires: number; value: any }>();
-export async function routerCatalog(kind: "text" | "image" | "video" | "voice") {
+export async function routerCatalog(kind: "text" | "image" | "video" | "voice" | "transcription") {
   const endpoint = kind === "image" ? "images/models" : kind === "video" ? "videos/models" : "models";
   const cached = cache.get(endpoint); if (cached && cached.expires > Date.now()) return cached.value;
   const response = await fetch(base + endpoint, { signal: AbortSignal.timeout(10000) });
@@ -26,7 +26,7 @@ export async function routerCatalog(kind: "text" | "image" | "video" | "voice") 
   const data = await response.json(); if (!Array.isArray(data.data)) throw new Error("Invalid OpenRouter catalog");
   cache.set(endpoint, { expires: Date.now() + 300000, value: data.data }); return data.data;
 }
-export async function verifiedRouterModel(id: string, kind: "text" | "image" | "video" | "voice") {
+export async function verifiedRouterModel(id: string, kind: "text" | "image" | "video" | "voice" | "transcription") {
   const models = await routerCatalog(kind), record = models.find((m: any) => m.id === routerId(id));
   const modality = kind === "voice" ? "speech" : kind;
   if (!record || (kind !== "video" && !record.architecture?.output_modalities?.includes(modality))) throw new Error(`OpenRouter model is not verified for ${kind}`);
@@ -38,11 +38,11 @@ export function checkCapability(record: any, key: string, value: any) {
 }
 export async function routerResponse(endpoint: string, body?: any, timeout = 180000) {
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured on this service");
-  if (!/^(chat\/completions|images|audio\/speech|videos(?:\/[\w-]+(?:\/content\?index=0)?)?)$/.test(endpoint)) throw new Error("Invalid OpenRouter endpoint");
+  if (!/^(chat\/completions|images|audio\/(?:speech|transcriptions)|videos(?:\/[\w-]+(?:\/content\?index=0)?)?)$/.test(endpoint)) throw new Error("Invalid OpenRouter endpoint");
   const response = await fetch(base + endpoint, { method: body ? "POST" : "GET", redirect: "error", headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeout) });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    if (body && mongoose.connection.readyState === 1) await GatewayUsage.create({ model: "openrouter/" + body.model, kind: endpoint === "chat/completions" ? "text" : endpoint === "images" ? "image" : endpoint === "audio/speech" ? "voice" : "video", status: "failed", usage: { httpStatus: response.status, costUnknown: true } });
+    if (body && mongoose.connection.readyState === 1) await GatewayUsage.create({ model: "openrouter/" + body.model, kind: endpoint === "chat/completions" ? "text" : endpoint === "images" ? "image" : endpoint === "audio/speech" ? "voice" : endpoint === "audio/transcriptions" ? "transcription" : "video", status: "failed", usage: { httpStatus: response.status, costUnknown: true } });
     const detail = String(data.error?.message || "Review provider access, balance and model availability");
     const privacy = /training violation|guardrail restrictions|data policy/i.test(detail);
     const definiteTextFailure = endpoint === "chat/completions" && response.status === 503 && !!data.error && !data.id && !data.generation_id;

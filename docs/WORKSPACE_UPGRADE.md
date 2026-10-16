@@ -17,6 +17,16 @@ This extends existing routes, wallet quotes, MongoDB records, R2 storage, Redis 
 
 ## Actual limitations and remaining work
 
+### Follow-up implementation
+
+- `Remove silent parts` now renders the current mixed soundtrack with FFmpeg, detects intervals below -35 dB for at least 0.6 seconds, and cuts video, every audio lane and captions against the same retained ranges. Handles preserve 0.12 seconds around speech. Results enter undo history; they are not saved automatically. This synchronous analysis is limited to five-minute edits and 500 MB of sources. Music can mask pauses. The feature does not classify speech semantically.
+- Clips now persist original/cinematic/vivid/monochrome/warm/cool looks plus bounded brightness, contrast, saturation, sharpening and vignette. Color controls preview approximately in the browser. FFmpeg applies all settings on export; sharpening and vignette are explicitly labeled export effects. This is a finite supported effects set, not an arbitrary plugin engine.
+- Shorts has an optional full-source transcription step, using OpenRouter speech-to-text in 60-second audio chunks across the entire source, up to one hour. Provider segment timestamps are offset, validated and saved with the job, with complete transcript review in the workspace. Missing timestamp support fails explicitly. The job's clip captions use the saved transcript instead of invented speech. No paid provider test was run.
+- Before enabling transcription, select a timestamp-capable model through Admin / Providers / full_video_transcription, and create an expiring verified per-minute override for that feature/model in Admin / Pricing. The combined approval includes the source duration rounded up to the next minute. The worker validates the measured source duration against approved bounds before calling the provider. Existing OpenRouter credentials are reused.
+- Continuous speaker tracking and the OpenRouter avatar adapter remain unimplemented. Direct avatar credentials must remain enabled. Public provider catalog verification from the terminal was blocked by an automatic approval-review account usage limit; no provider contract or successful live render is claimed.
+
+The older limitation descriptions below describe the previous increment; the implemented silence/effects/full-transcription changes above supersede those particular items.
+
 - No complete CapCut clone is claimed. Multiple visual overlay lanes, automatic silence cutting, general effects/color grading, playback-speed processing, waveform display and subject tracking are not implemented by these changes. Existing visual sequencing and multiple audio/caption tracks still work. The editor assistant explains unsupported requests.
 - The Studio coordinator supports explicit production commands, not a general LLM tool caller across every editing/rendering action. Rendering still uses the existing editor export approval and dedicated FFmpeg worker.
 - Shorts generates selected-moment speech captions, not a complete source transcript. Speaker framing is an estimated fixed horizontal crop per moment, not continuous face tracking. Full-source ASR and dynamic reframing remain separate work.

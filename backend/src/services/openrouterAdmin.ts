@@ -21,7 +21,7 @@ export async function routerPricing(id: string, kind: string) {
 }
 export async function routerAdminCatalog() {
   const result: any[] = [];
-  const kinds = ["text", "image", "video", "voice"] as const;
+  const kinds = ["text", "image", "video", "voice", "transcription"] as const;
   const failures: string[] = [];
   await Promise.all(kinds.map(async kind => {
     try {
@@ -31,6 +31,7 @@ export async function routerAdminCatalog() {
         const id = "openrouter/" + record.id;
         if (allowed && !allowed.some(m => m.id === id)) continue;
         if (kind === "text" && (!record.architecture?.output_modalities?.includes("text") || !record.supported_parameters?.includes("response_format"))) continue;
+        if (kind === "transcription" && !record.architecture?.output_modalities?.includes("transcription")) continue;
         if (kind === "voice" && !record.architecture?.output_modalities?.includes("speech")) continue;
         result.push({ provider: "openrouter", model: id, configured: !!env.OPENROUTER_API_KEY, type: kind, pricingStatus: "Published rates available through View pricing", verifiedAt: new Date().toISOString() });
       }
