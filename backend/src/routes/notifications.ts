@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { z } from "zod";
+import { Notification } from "../models/Notification.js";
+import { requireAuth, requireCsrf } from "../middleware/auth.js";
+import { emitUserEvent } from "../realtime.js";
+export const notificationsRouter = Router();
+notificationsRouter.use(requireAuth, requireCsrf);
+const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch(next);
+const id = z.string().regex(/^[a-f\d]{24}$/i);
+notificationsRouter.get("/", wrap(async (req: any, res: any) => { const before = id.optional().parse(req.query.before); const items = await Notification.find({ userId: req.user._id, ...(before ? { _id: { $lt: before } } : {}) }).sort({ _id: -1 }).limit(31); const unread = await Notification.countDocuments({ userId: req.user._id, readAt: null }); res.json({ items: items.slice(0, 30), next: items.length > 30 ? String(items[29]._id) : null, unread }); }));
+notificationsRouter.post("/read", wrap(async (req: any, res: any) => { const input = z.object({ ids: z.array(id).min(1).max(100) }).parse(req.body); await Notification.updateMany({ _id: { $in: input.ids }, userId: req.user._id, readAt: null }, { $set: { readAt: new Date() } }); emitUserEvent(String(req.user._id), "notifications:changed", {}); res.json({ ok: true }); }));
+notificationsRouter.get("/preferences", (req, res) => res.json({ preferences: { supportEmails: req.user.preferences?.supportEmails !== false, generationNotifications: req.user.preferences?.generationNotifications !== false, marketingEmails: req.user.preferences?.marketingEmails === true } }));
+notificationsRouter.patch("/preferences", wrap(async (req: any, res: any) => { const input = z.object({ supportEmails: z.boolean().optional(), generationNotifications: z.boolean().optional(), marketingEmails: z.boolean().optional() }).parse(req.body); for (const [key, value] of Object.entries(input)) req.user.set(`preferences.${key}`, value); await req.user.save(); res.json({ preferences: req.user.preferences }); }));

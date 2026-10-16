@@ -1,0 +1,58 @@
+import dotenv from "dotenv";
+import { z } from "zod";
+
+dotenv.config();
+dotenv.config({ path: "../.env", override: false });
+
+const envSchema = z.object({
+  ADMIN_BOOTSTRAP_EMAIL: z.string().email().transform(v => v.toLowerCase()).optional(),
+  ADMIN_BOOTSTRAP_PASSWORD: z.string().min(14).max(200).optional(),
+  ADMIN_BOOTSTRAP_PASSWORD_HASH: z.string().optional(),
+  ADMIN_BOOTSTRAP_ENABLED: z.preprocess(v => v === true || v === "true", z.boolean()).default(false),
+  HEYGEN_API_KEY: z.string().optional(),
+  AVATAR_PRESENTERS_JSON: z.string().optional(),
+  ADMIN_LOGIN_METHOD: z.enum(["email", "totp"]).default("email"),
+  ADMIN_TOTP_SECRET: z.string().regex(/^[A-Z2-7]{16,128}$/).optional(),
+  MONGODB_URI: z.string().min(1).optional(),
+  SERVE_FRONTEND: z.preprocess(v => v === true || v === "true", z.boolean()).default(false),
+  PORT: z.coerce.number().default(4000),
+  CLIENT_ORIGIN: z.string().url().default("http://localhost:5173"),
+  APP_URL: z.string().url().default("http://localhost:5173"),
+  SESSION_SECRET: z.string().min(24).default("dev-only-change-this-session-secret"),
+  RESEND_API_KEY: z.string().optional(),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_SECURE: z.preprocess((value) => value === true || value === "true", z.boolean()).default(false),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  EMAIL_FROM: z.string().default("Drex <hello@yourdomain.com>"),
+  UPLOAD_DIR: z.string().default("uploads"),
+  FFMPEG_PATH: z.string().optional(),
+  FFPROBE_PATH: z.string().optional(),
+  RENDER_QUEUE_ENABLED: z.preprocess(value => value === true || value === "true", z.boolean()).default(false),
+  FLUTTERWAVE_MODE: z.enum(["test"]).default("test"),
+  FLW_PUBLIC_KEY: z.string().optional(),
+  FLW_SECRET_KEY: z.string().optional(),
+  FLW_WEBHOOK_HASH: z.string().optional(),
+  PAYMENT_CURRENCY: z.enum(["USD", "NGN"]).default("USD"),
+  YOUTUBE_API_KEY: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_OAUTH_REDIRECT_URI: z.string().url().default("http://localhost:4000/api/youtube/oauth/callback"),
+  TOKEN_ENCRYPTION_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-3.8-flash"),
+  GEMINI_TTS_MODEL: z.string().default("gemini-3.8-flash-tts"),
+  GEMINI_IMAGE_MODEL: z.string().default("gemini-nano-banana-2.1"),
+  REDIS_URL: z.string().default("redis://localhost:6379"),
+  IMAGE_QUEUE_ENABLED: z.preprocess((value) => value === true || value === "true", z.boolean()).default(false),
+  STUDIO_QUEUE_ENABLED: z.preprocess((value) => value === true || value === "true", z.boolean()).default(false),
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().optional(),
+  R2_PUBLIC_BASE_URL: z.string().optional(),
+  VEO_MODEL: z.string().default("veo-3.1-generate-preview")
+});
+
+export const env = envSchema.parse(process.env);

@@ -1,0 +1,46 @@
+import { MediaAsset } from "../models/MediaAsset.js";
+import { VideoGenerationJob } from "../models/VideoGenerationJob.js";
+import { createVeoOperation, downloadVeoVideos, pollVeoOperation } from "../services/videoGeneration.js";
+import { uploadVideo } from "../services/mediaStorage.js";
+import { releaseReservation, settleReservation } from "../services/wallet.js";
+import { readSourceImage } from "../services/sourceImages.js";
+
+export async function processVideoJob(jobId: string) {
+  const job = await VideoGenerationJob.findOneAndUpdate({ _id: jobId, status: { $in: ["queued", "retrying"] } }, { $set: { status: "processing" }, $inc: { attempts: 1 } }, { new: true });
+  if (!job) return;
+  try {
+    job.status = "processing";
+    job.progress = 10;
+    await job.save();
+    const source = await MediaAsset.findOne({ _id: job.sourceImageAssetId, userId: job.userId, type: "image", deletedAt: null });
+    if (!source) throw new Error("Source image is no longer available. Upload or select an image again.");
+    const image = await readSourceImage(source);
+    const operationName = job.providerJobId || await createVeoOperation({ ...job.toObject(), sourceImageBytes: image.buffer.toString("base64"), sourceImageMimeType: image.contentType });
+    job.providerJobId = operationName;
+    job.progress = 35;
+    await job.save();
+    const operation = await pollVeoOperation(operationName);
+    job.progress = 80;
+    await job.save();
+    const outputs = await downloadVeoVideos(operation);
+    const assets = [];
+    for (let index = 0; index < outputs.length; index += 1) {
+      const output = outputs[index];
+      const key = `${job.userId}/videos/${job._id}-${index}.mp4`;
+      const stored = await uploadVideo(output.buffer, key, output.contentType);
+      assets.push(await MediaAsset.create({ userId: job.userId, projectId: job.projectId, jobId: job._id, type: "video", prompt: job.motionPrompt, provider: job.provider, model: job.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, durationSeconds: job.durationSeconds, metadata: { aspectRatio: job.aspectRatio, quality: job.quality, provider: output.metadata } }));
+    }
+    job.status = "completed";
+    job.progress = 100;
+    job.outputMetadata = { assetIds: assets.map((asset) => asset._id), count: assets.length };
+    job.completedAt = new Date();
+    await job.save();
+    if (job.reservationId) await settleReservation(String(job.reservationId));
+  } catch (error) {
+    job.status = "failed";
+    job.error = error instanceof Error ? error.message : "Video generation failed";
+    await job.save();
+    if (job.reservationId) await releaseReservation(String(job.reservationId), "video_generation_failed");
+    throw error;
+  }
+}

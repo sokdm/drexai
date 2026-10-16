@@ -1,0 +1,25 @@
+{
+  "name": "drex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "worker:render": "npm run worker:render --workspace backend",
+    "dev": "concurrently \"npm run dev --workspace frontend\" \"npm run dev --workspace backend\"",
+    "build": "npm run build --workspace shared && npm run build --workspace frontend && npm run build --workspace backend",
+    "start": "npm run start --workspace backend",
+    "worker:image": "npm run worker:image --workspace backend",
+    "worker:video": "npm run worker:video --workspace backend",
+    "worker:studio": "npm run worker:studio --workspace backend",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "typescript": "^5.6.3"
+  }
+}

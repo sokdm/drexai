@@ -1,0 +1,46 @@
+import { FormEvent, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "../../components/ui/Button";
+import { Loader } from "../../components/ui/Loader";
+import { api } from "../../lib/api";
+import { Field, TextArea, quote } from "./aiShared";
+
+export function ScriptBuilderPage() {
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [niches, setNiches] = useState<any[]>([]);
+  const [project, setProject] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [settings, setSettings] = useState<any>({ storyTopic: "A cinematic faceless story about a hidden city under the ocean", type: "Animated story", genre: "Adventure", language: "English", targetDuration: "8 minutes", numberOfCharacters: 3, visualStyle: "cinematic 3D animation", dialoguePreference: "Narration-led", audience: "teens and adults", tone: "mysterious and inspiring" });
+  useEffect(() => { api<any>("/api/ai/niches").then((d) => setNiches(d.niches)); }, []);
+  async function generate(event: FormEvent) { event.preventDefault(); setLoading(true); try { const approvedCredits = await quote("story_generation"); const data = await api<any>("/api/ai/scripts/generate", { method: "POST", body: JSON.stringify({ settings, approvedCredits }) }); setProject(data.project); } finally { setLoading(false); } }
+  useEffect(() => {
+    const id = params.get("projectId");
+    if (id) api<any>(`/api/ai/projects/${id}`).then(data => setProject(data.project)).catch(err => setError(err.message));
+  }, [params]);
+  async function approveScript() {
+    setSaving(true); setError("");
+    try {
+      await saveScenes();
+      const data = await api<any>(`/api/ai/projects/${project._id}/approve`, { method: "POST", body: "{}" });
+      setProject(data.project);
+    } catch (err) { setError(err instanceof Error ? err.message : "Approval failed"); }
+    finally { setSaving(false); }
+  }
+  async function continueInStudio() {
+    setSaving(true); setError("");
+    try {
+      await api(`/api/ai/projects/${project._id}/continue-ai-studio`, { method: "POST", body: "{}" });
+      navigate(`/dashboard/ai-studio?projectId=${project._id}`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not open Studio"); }
+    finally { setSaving(false); }
+  }
+  async function saveScenes() { const data = await api<any>(`/api/ai/projects/${project._id}/scenes`, { method: "PATCH", body: JSON.stringify({ scenes: project.scenes }) }); setProject(data.project); }
+  return <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]"><section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-3xl font-black">Script Builder</h2>{error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}<form className="mt-6 space-y-4" onSubmit={generate}><TextArea label="Story topic" value={settings.storyTopic} onChange={(v) => setSettings({ ...settings, storyTopic: v })} /><label className="block text-sm font-semibold">Niche<select value={settings.nicheId ?? ""} onChange={(e) => setSettings({ ...settings, nicheId: e.target.value })} className="mt-2 h-11 w-full rounded-md border border-line bg-transparent px-3 dark:border-slate-700"><option value="">No niche</option>{niches.map((n) => <option key={n._id} value={n._id}>{n.name}</option>)}</select></label>{["type", "genre", "language", "targetDuration", "visualStyle", "audience", "tone"].map((key) => <Field key={key} label={key} value={settings[key] ?? ""} onChange={(v) => setSettings({ ...settings, [key]: v })} />)}<Button disabled={loading}>{loading ? "Generating..." : "Generate structured script"}</Button></form></section><section className="space-y-4">{loading && <Loader label="Gemini is planning scenes" />}{project && <><div className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-2xl font-black">{project.title}</h2><p className="mt-2 text-slate-600 dark:text-slate-300">{project.summary}</p><div className="mt-4 flex flex-wrap gap-2"><Button onClick={saveScenes}>Save version</Button><Button variant="secondary" disabled={saving} onClick={approveScript}>{project.approvedAt ? "Approved" : "Approve script"}</Button><Button variant="secondary" disabled={saving || !project.approvedAt} onClick={continueInStudio}>Continue in AI Studio</Button></div></div>{project.scenes.map((scene: any, index: number) => <SceneEditor scene={scene} key={scene._id ?? index} onChange={(updated) => { const scenes = [...project.scenes]; scenes[index] = updated; setProject({ ...project, scenes, approvedAt: undefined }); }} />)}</>}</section></div>;
+}
+
+function SceneEditor({ scene, onChange }: { scene: any; onChange: (scene: any) => void }) {
+  return <div className="rounded-md border border-line bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h3 className="font-black">Scene {scene.order}: {scene.title}</h3><div className="mt-4 grid gap-4 md:grid-cols-2"><TextArea label="Narration" value={scene.narration ?? ""} onChange={(v) => onChange({ ...scene, narration: v })} /><TextArea label="Dialogue" value={scene.dialogue ?? ""} onChange={(v) => onChange({ ...scene, dialogue: v })} /><TextArea label="Image prompt" value={scene.imagePrompt ?? ""} onChange={(v) => onChange({ ...scene, imagePrompt: v })} /><TextArea label="Motion prompt" value={scene.videoMotionPrompt ?? ""} onChange={(v) => onChange({ ...scene, videoMotionPrompt: v })} /></div></div>;
+}

@@ -1,0 +1,21 @@
+node_modules
+dist
+.env
+.env.local
+coverage
+.DS_Store
+*.log
+test-results
+playwright-report
+uploads/
+
+# All secret environment variants (keep only safe templates)
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*credentials*.json
+*.p12
+*.pfx
+.npmrc

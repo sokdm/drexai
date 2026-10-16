@@ -1,0 +1,205 @@
+{
+  "probe": {
+    "duration": 6.5,
+    "width": 854,
+    "height": 480,
+    "video": true,
+    "audio": true,
+    "videoCodec": "h264",
+    "audioCodec": "aac"
+  },
+  "bytes": 162966,
+  "durationExpected": 6.5,
+  "exportId": "6ad1ec01de6c26bb35e208a5",
+  "revision": 1,
+  "storage": "local S3 protocol test server; no live R2 credentials used",
+  "worker": "dedicated FFmpeg process",
+  "timeline": {
+    "clips": [
+      {
+        "id": "intro",
+        "label": "Intro",
+        "kind": "title",
+        "sourceIn": 0,
+        "duration": 0.5,
+        "transition": "cut",
+        "fit": "contain",
+        "text": "Original story",
+        "textStyle": {
+          "font": "Georgia",
+          "size": 48,
+          "position": "center",
+          "preset": "clean"
+        }
+      },
+      {
+        "id": "0562df4c-9561-4ae7-babc-904cfdd84972",
+        "sceneId": "s1",
+        "label": "First scene",
+        "kind": "video",
+        "assetId": "6ad1ebf4de6c26bb35e2083a",
+        "sourceIn": 0,
+        "duration": 2,
+        "transition": "fade",
+        "fit": "contain",
+        "text": "",
+        "textStyle": {
+          "font": "Arial",
+          "size": 36,
+          "position": "bottom",
+          "preset": "clean"
+        }
+      },
+      {
+        "id": "91de054b-4f66-4efb-8ca2-9a1a0987021e",
+        "sceneId": "s2",
+        "label": "Second scene",
+        "kind": "video",
+        "assetId": "6ad1ebf4de6c26bb35e2083c",
+        "sourceIn": 0,
+        "duration": 2,
+        "transition": "cut",
+        "fit": "contain",
+        "text": "",
+        "textStyle": {
+          "font": "Arial",
+          "size": 36,
+          "position": "bottom",
+          "preset": "clean"
+        }
+      },
+      {
+        "id": "8cdea858-c363-4cfd-b89e-d5d3a9d4efa0",
+        "sceneId": "s3",
+        "label": "Still image scene",
+        "kind": "image",
+        "assetId": "6ad1ebf5de6c26bb35e2083e",
+        "sourceIn": 0,
+        "duration": 1.5,
+        "transition": "cut",
+        "fit": "contain",
+        "text": "",
+        "textStyle": {
+          "font": "Arial",
+          "size": 36,
+          "position": "bottom",
+          "preset": "clean"
+        }
+      },
+      {
+        "id": "outro",
+        "label": "Outro",
+        "kind": "title",
+        "sourceIn": 0,
+        "duration": 0.5,
+        "transition": "cut",
+        "fit": "contain",
+        "text": "The end",
+        "textStyle": {
+          "font": "Georgia",
+          "size": 48,
+          "position": "center",
+          "preset": "clean"
+        }
+      }
+    ],
+    "audio": [
+      {
+        "id": "3392ee52-1f0c-443a-b2ea-69d321d30f26",
+        "assetId": "6ad1ebf5de6c26bb35e20840",
+        "label": "Narrator · First scene",
+        "role": "narration",
+        "start": 0.25,
+        "sourceIn": 0,
+        "duration": 1,
+        "volume": 1,
+        "muted": false,
+        "fadeIn": 0,
+        "fadeOut": 0,
+        "anchorClipId": "0562df4c-9561-4ae7-babc-904cfdd84972"
+      },
+      {
+        "id": "c1c83ae8-33dc-47b3-a020-43eedb40e798",
+        "assetId": "6ad1ebf5de6c26bb35e20840",
+        "label": "Character · Second scene",
+        "role": "dialogue",
+        "start": 0.4,
+        "sourceIn": 0,
+        "duration": 1,
+        "volume": 1,
+        "muted": false,
+        "fadeIn": 0,
+        "fadeOut": 0,
+        "anchorClipId": "91de054b-4f66-4efb-8ca2-9a1a0987021e"
+      },
+      {
+        "id": "music",
+        "assetId": "6ad1ebfdde6c26bb35e20867",
+        "label": "Original licensed test music",
+        "role": "music",
+        "start": 0,
+        "sourceIn": 0,
+        "duration": 6.5,
+        "volume": 0.15,
+        "muted": false,
+        "fadeIn": 0.2,
+        "fadeOut": 0.4
+      },
+      {
+        "id": "spoken",
+        "assetId": "6ad1ebf5de6c26bb35e20842",
+        "label": "Original spoken narration",
+        "role": "narration",
+        "start": 4.4608620000000005,
+        "sourceIn": 0,
+        "duration": 2.039138,
+        "volume": 0.8,
+        "muted": false,
+        "fadeIn": 0,
+        "fadeOut": 0
+      }
+    ],
+    "captions": [
+      {
+        "id": "728fd2b9-49ad-4cc5-b8fd-5b5eb2328d43",
+        "text": "An original scene begins here.",
+        "start": 0.25,
+        "end": 1.25,
+        "anchorClipId": "0562df4c-9561-4ae7-babc-904cfdd84972",
+        "style": {
+          "font": "Arial",
+          "size": 36,
+          "position": "bottom",
+          "preset": "clean"
+        }
+      },
+      {
+        "id": "c50c8d24-86e0-44a5-a8f7-2ff1c5b4ac7d",
+        "text": "An original scene begins here.",
+        "start": 0.4,
+        "end": 1.4,
+        "anchorClipId": "91de054b-4f66-4efb-8ca2-9a1a0987021e",
+        "style": {
+          "font": "Arial",
+          "size": 36,
+          "position": "bottom",
+          "preset": "clean"
+        }
+      },
+      {
+        "id": "6e61272f-2e7d-4880-b525-5a01d170dfa4",
+        "text": "The original story ends.",
+        "start": 4.4608620000000005,
+        "end": 6.5,
+        "style": {
+          "font": "Arial",
+          "size": 36,
+          "position": "bottom",
+          "preset": "clean"
+        }
+      }
+    ],
+    "aspectRatio": "16:9",
+    "musicDecision": "added"
+  }
+}

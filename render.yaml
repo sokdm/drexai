@@ -1,0 +1,105 @@
+# Review before deployment: these services incur hosting charges.
+# This file assumes Drex is the repository root. If it lives in /drex,
+# add rootDir: drex to every Node service and select drex/render.yaml.
+services:
+  - type: keyvalue
+    name: drex-redis
+    region: frankfurt
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  - type: web
+    name: drex
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - fromGroup: drex-private
+      - key: NODE_ENV
+        value: production
+      - key: SERVE_FRONTEND
+        value: "true"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: drex-redis
+          property: connectionString
+      - key: IMAGE_QUEUE_ENABLED
+        value: "true"
+      - key: STUDIO_QUEUE_ENABLED
+        value: "true"
+      - key: RENDER_QUEUE_ENABLED
+        value: "true"
+
+  - type: worker
+    name: drex-studio-worker
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: npm ci && npm run build --workspace shared && npm run build --workspace backend
+    startCommand: npm run worker:studio --workspace backend
+    envVars:
+      - fromGroup: drex-private
+      - key: STUDIO_QUEUE_ENABLED
+        value: "true"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: drex-redis
+          property: connectionString
+
+  - type: worker
+    name: drex-image-worker
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: npm ci && npm run build --workspace shared && npm run build --workspace backend
+    startCommand: npm run worker:image --workspace backend
+    envVars:
+      - fromGroup: drex-private
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: drex-redis
+          property: connectionString
+
+  - type: worker
+    name: drex-video-worker
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: npm ci && npm run build --workspace shared && npm run build --workspace backend
+    startCommand: npm run worker:video --workspace backend
+    envVars:
+      - fromGroup: drex-private
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: drex-redis
+          property: connectionString
+
+  - type: worker
+    name: drex-render-worker
+    runtime: node
+    region: frankfurt
+    plan: standard
+    buildCommand: npm ci && npm run build --workspace shared && npm run build --workspace backend
+    startCommand: npm run worker:render --workspace backend
+    envVars:
+      - fromGroup: drex-private
+      - key: RENDER_QUEUE_ENABLED
+        value: "true"
+
+  - type: worker
+    name: drex-creative-worker
+    runtime: node
+    region: frankfurt
+    plan: standard
+    buildCommand: npm ci && npm run build --workspace shared && npm run build --workspace backend
+    startCommand: npm run worker:creative --workspace backend
+    envVars:
+      - fromGroup: drex-private
