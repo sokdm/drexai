@@ -1,3 +1,4 @@
+import { geminiFetch } from "./geminiRequest.js";
 import { withProvider } from "./platformControl.js";
 import { env } from "../config/env.js";
 
@@ -32,17 +33,29 @@ async function generateGeminiImagesUnchecked(settings: any) {
   const prompt = `${settings.prompt}\nStyle: ${settings.stylePreset || "natural"}\nAspect ratio: ${settings.aspectRatio}\nResolution: ${settings.resolution}`;
   const outputs: { buffer: Buffer; contentType: string }[] = [];
   for (let index = 0; index < settings.numberOfImages; index += 1) {
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    const response = await geminiFetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
       method: "POST",
       headers: { "x-goog-api-key": env.GEMINI_API_KEY, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(180000),
-      body: JSON.stringify({ model: settings.model || env.GEMINI_IMAGE_MODEL, input: [{ type: "text", text: prompt }, ...(settings.referenceImages ?? []).map((image: any) => ({ type: "image", mime_type: image.contentType, data: image.data }))], response_format: { type: "image", mime_type: "image/png", aspect_ratio: settings.aspectRatio, image_size: settings.resolution } })
-    });
+      body: JSON.stringify({ model: settings.model || env.GEMINI_IMAGE_MODEL, input: [{ type: "text", text: prompt }, ...(settings.referenceImages ?? []).map((image: any) => ({ type: "image", mime_type: image.contentType, data: image.data }))], response_format: { type: "image", mime_type: "image/jpeg", aspect_ratio: settings.aspectRatio, image_size: settings.resolution } })
+    }, 180000);
     const data = await response.json();
     if (!response.ok) throw Object.assign(new Error(data.error?.message ?? "Gemini image generation failed"), { providerRejected: response.status < 500 });
-    const base64 = data.output_image?.data ?? data.interaction?.outputImage?.data;
+    const image = findImage(data);
+    const base64 = image?.data;
     if (!base64) throw new Error("Provider returned no image data");
-    outputs.push({ buffer: Buffer.from(base64, "base64"), contentType: "image/png" });
+    const buffer = Buffer.from(base64, "base64");
+    const png = buffer.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+    if (!png && !(buffer[0] === 255 && buffer[1] === 216)) throw new Error("Provider returned an unsupported image file");
+    outputs.push({ buffer, contentType: png ? "image/png" : "image/jpeg" });
   }
   return outputs;
+}
+
+function findImage(value: any): any {
+  if (!value || typeof value !== "object") return undefined;
+  if (typeof value.data === "string" && (value.type === "image" || value.mime_type?.startsWith("image/"))) return value;
+  if (value.output_image?.data) return value.output_image;
+  if (value.outputImage?.data) return value.outputImage;
+  for (const child of Array.isArray(value) ? value : [value.outputs, value.steps, value.content, value.output, value.interaction]) { const found = findImage(child); if (found) return found; }
 }

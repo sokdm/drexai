@@ -46,7 +46,7 @@ before(async () => {
   globalThis.fetch = async (url, options = {}) => {
     if (String(url).startsWith(base)) return originalFetch(url, options);
     const u = new URL(String(url));
-    if (u.hostname === "generativelanguage.googleapis.com") { state.generations++; if (state.fail) return Response.json({ error: { message: "Provider rejected test request" } }, { status: 400 }); const body = JSON.parse(options.body); return Response.json(body.response_format?.type === "image" ? { output_image: { data: png.toString("base64") } } : { output_text: JSON.stringify(metadata) }); }
+    if (u.hostname === "generativelanguage.googleapis.com") { state.generations++; if (state.fail) return Response.json({ error: { message: "Provider rejected test request" } }, { status: 400 }); const body = JSON.parse(options.body); if (body.response_format?.type === "image") assert.equal(body.response_format.mime_type, "image/jpeg"); return Response.json(body.response_format?.type === "image" ? { output_image: { data: png.toString("base64") } } : { output_text: JSON.stringify(metadata) }); }
     if (u.hostname === "youtubeanalytics.googleapis.com") { assert.equal(options.headers.Authorization, "Bearer test-access"); return Response.json({ columnHeaders: [{ name: "day" }, { name: "views" }], rows: Array.from({ length: 28 }, (_, i) => { const d = new Date(Date.UTC(2026, 8, 1 + i)); return [d.toISOString().slice(0, 10), d.getUTCDay() === 2 ? 700 : 10]; }) }); }
     throw new Error(`Unexpected external request ${u.hostname}`);
   };

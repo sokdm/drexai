@@ -14,7 +14,7 @@ export async function processImageJob(jobId: string) {
     const assets = [];
     for (let index = 0; index < outputs.length; index += 1) {
       const output = outputs[index];
-      const key = `${job.userId}/images/${job._id}-${index}.png`;
+      const key = `${job.userId}/images/${job._id}-${index}.${output.contentType === "image/jpeg" ? "jpg" : "png"}`;
       const stored = await uploadImage(output.buffer, key, output.contentType);
       assets.push(await MediaAsset.create({ userId: job.userId, projectId: job.projectId, jobId: job._id, prompt: job.prompt, provider: job.provider, model: job.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, metadata: { stylePreset: job.stylePreset, aspectRatio: job.aspectRatio, resolution: job.resolution } }));
     }

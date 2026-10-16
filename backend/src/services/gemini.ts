@@ -1,3 +1,4 @@
+import { geminiFetch } from "./geminiRequest.js";
 import { geminiSchema } from "./geminiSchema.js";
 import { withProvider, defaultModel } from "./platformControl.js";
 import { z } from "zod";
@@ -63,7 +64,7 @@ export async function geminiJson<T>(input: {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
   const raw = await withProvider(selectedModel, () => withRetry(async () => {
-    const response = await fetch(GEMINI_URL, {
+    const response = await geminiFetch(GEMINI_URL, {
       method: "POST",
       signal: AbortSignal.timeout(90000),
       headers: { "x-goog-api-key": env.GEMINI_API_KEY!, "Content-Type": "application/json" },
@@ -76,7 +77,7 @@ export async function geminiJson<T>(input: {
       })
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message ?? "Gemini request failed");
+    if (!response.ok) throw new Error([429, 503].includes(response.status) ? "Gemini is temporarily busy after automatic retries. Please try again shortly; reserved credits will be released." : data.error?.message ?? "Gemini request failed");
     return data.output_text ?? extractText(data);
   }));
   const parsed = parseJson(raw);
@@ -89,7 +90,7 @@ export async function geminiText(input: { system: string; prompt: string; maxOut
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
   return withProvider(selectedModel, () => withRetry(async () => {
-    const response = await fetch(GEMINI_URL, {
+    const response = await geminiFetch(GEMINI_URL, {
       method: "POST",
       signal: AbortSignal.timeout(90000),
       headers: { "x-goog-api-key": env.GEMINI_API_KEY!, "Content-Type": "application/json" },
@@ -101,7 +102,7 @@ export async function geminiText(input: { system: string; prompt: string; maxOut
       })
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message ?? "Gemini request failed");
+    if (!response.ok) throw new Error([429, 503].includes(response.status) ? "Gemini is temporarily busy after automatic retries. Please try again shortly; reserved credits will be released." : data.error?.message ?? "Gemini request failed");
     return data.output_text ?? extractText(data);
   }));
 }
@@ -126,7 +127,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 0): Promise<T> {
       return await fn();
     } catch (error) {
       lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 400 * (index + 1)));
+
     }
   }
   if (lastError instanceof Error && ["TimeoutError", "AbortError"].includes(lastError.name)) throw new Error("Gemini did not finish within 90 seconds. The request failed; try again with a shorter script.");
