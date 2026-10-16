@@ -14,7 +14,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: npm ci --include=dev && npm run build
+    buildCommand: npm ci --include=dev --include=optional && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
@@ -40,7 +40,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: npm ci --include=dev && npm run build --workspace shared && npm run build --workspace backend
+    buildCommand: npm ci --include=dev --include=optional && npm run build --workspace shared && npm run build --workspace backend
     startCommand: npm run worker:studio --workspace backend
     envVars:
       - fromGroup: drex-private
@@ -57,7 +57,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: npm ci --include=dev && npm run build --workspace shared && npm run build --workspace backend
+    buildCommand: npm ci --include=dev --include=optional && npm run build --workspace shared && npm run build --workspace backend
     startCommand: npm run worker:image --workspace backend
     envVars:
       - fromGroup: drex-private
@@ -72,7 +72,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: npm ci --include=dev && npm run build --workspace shared && npm run build --workspace backend
+    buildCommand: npm ci --include=dev --include=optional && npm run build --workspace shared && npm run build --workspace backend
     startCommand: npm run worker:video --workspace backend
     envVars:
       - fromGroup: drex-private
@@ -87,7 +87,7 @@ services:
     runtime: node
     region: frankfurt
     plan: standard
-    buildCommand: npm ci --include=dev && npm run build --workspace shared && npm run build --workspace backend
+    buildCommand: npm ci --include=dev --include=optional && npm run build --workspace shared && npm run build --workspace backend
     startCommand: npm run worker:render --workspace backend
     envVars:
       - fromGroup: drex-private
@@ -99,7 +99,7 @@ services:
     runtime: node
     region: frankfurt
     plan: standard
-    buildCommand: npm ci --include=dev && npm run build --workspace shared && npm run build --workspace backend
+    buildCommand: npm ci --include=dev --include=optional && npm run build --workspace shared && npm run build --workspace backend
     startCommand: npm run worker:creative --workspace backend
     envVars:
       - fromGroup: drex-private
