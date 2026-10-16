@@ -1,4 +1,7 @@
 import { dispatchGeneration } from "../services/generationDispatch.js";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
+import { openMediaStream } from "../services/mediaStorage.js";
 import { providerFor } from "../services/openrouter.js";
 import { sceneAudioFields } from "../services/sceneAudio.js";
 import { AIProject } from "../models/AIProject.js";
@@ -92,6 +95,22 @@ videosRouter.get("/jobs", async (req, res) => {
   const jobs = await VideoGenerationJob.find({ userId: req.user._id }).sort({ createdAt: -1 }).limit(50);
   const assets = await MediaAsset.find({ userId: req.user._id, type: "video", deletedAt: null }).sort({ createdAt: -1 }).limit(100);
   res.json({ jobs, assets });
+});
+
+videosRouter.get("/assets/:id/download", async (req, res, next) => {
+  try {
+    const id = z.string().regex(/^[a-f\d]{24}$/i).parse(req.params.id);
+    const asset = await MediaAsset.findOne({ _id: id, userId: req.user._id, type: "video", deletedAt: null });
+    if (!asset) return res.status(404).json({ error: "Video not found" });
+    if (asset.url?.startsWith("data:video/mp4;base64,")) {
+      res.set({ "Content-Type": "video/mp4", "Content-Disposition": `attachment; filename="drex-video-${asset._id}.mp4"`, "Cache-Control": "private, no-store" });
+      return res.send(Buffer.from(asset.url.split(",")[1], "base64"));
+    }
+    const object = await openMediaStream(asset.key);
+    if (!object.Body) return res.status(404).json({ error: "Video file not found" });
+    res.set({ "Content-Type": "video/mp4", "Content-Disposition": `attachment; filename="drex-video-${asset._id}.mp4"`, "Cache-Control": "private, no-store", ...(object.ContentLength != null ? { "Content-Length": String(object.ContentLength) } : {}) });
+    await pipeline(object.Body as Readable, res);
+  } catch (error) { next(error); }
 });
 
 videosRouter.get("/assets/:id/url", async (req, res) => {

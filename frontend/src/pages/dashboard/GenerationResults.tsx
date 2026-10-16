@@ -1,3 +1,4 @@
+import { downloadMedia } from "../../lib/downloadMedia";
 import { useEffect, useState } from "react";
 import { Copy, Download, Film, ImageIcon, Loader2, RefreshCw, Trash2, Video } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -12,6 +13,7 @@ export function GenerationResults({ kind, assets, jobs, busy, onRefresh, onRegen
   const [tab, setTab] = useState("results");
   const [selectedId, setSelectedId] = useState("");
   const [url, setUrl] = useState("");
+  const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState("");
   const selected = assets.find(asset => asset._id === selectedId) ?? assets[0];
   const active = jobs.find(job => ["queued", "processing", "retrying"].includes(job.status));
@@ -30,7 +32,7 @@ export function GenerationResults({ kind, assets, jobs, busy, onRefresh, onRegen
       {kind === "video" && selected?.metadata?.nativeAudio && <p className="px-4 py-2 text-xs text-slate-500">Native audio detected. Review dialogue, voices and mouth synchronization before using this clip. Regenerate uses a new cost approval.</p>}
       <footer className="result-bar"><span className="truncate text-xs text-slate-500">{selected ? `${selected.metadata?.name || (kind === "image" ? "Generated image" : "Generated clip")}${selected.durationSeconds ? ` / ${selected.durationSeconds}s` : ""}` : "Output preview"}</span>
         <div className="flex shrink-0 gap-1">{selected && <>
-          <a href={url} download target="_blank" rel="noreferrer" className="tool-icon" title="Download" aria-label="Download result"><Download size={16} /></a>
+          <button type="button" disabled={downloading} className="tool-icon" title="Save to device" aria-label="Download result" onClick={async () => { setDownloading(true); setNotice(""); try { const extension = kind === "video" ? "mp4" : selected.contentType === "image/jpeg" ? "jpg" : selected.contentType === "image/webp" ? "webp" : "png"; await downloadMedia(`/api/${kind === "video" ? "videos" : "images"}/assets/${selected._id}/download`, `drex-${kind}-${selected._id}.${extension}`); setNotice("Download started."); } catch (error: any) { setNotice(error.message); } finally { setDownloading(false); } }}>{downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}</button>
           <button className="tool-icon" title="Copy prompt" aria-label="Copy prompt" onClick={() => navigator.clipboard.writeText(selected.prompt ?? "").then(() => setNotice("Prompt copied.")).catch(() => setNotice("Clipboard unavailable."))}><Copy size={16} /></button>
           <button className="tool-icon" title="Reuse settings" aria-label="Reuse settings" onClick={() => onRegenerate(selected)}><RefreshCw size={16} /></button>
           {kind === "image" && <Link className="tool-icon" title="Animate image" aria-label="Animate image" to={`/dashboard/image-to-video?imageId=${selected._id}`}><Video size={16} /></Link>}
