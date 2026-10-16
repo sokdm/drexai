@@ -29,7 +29,7 @@ export const StudioProduction = model("StudioProduction", productionSchema);
 const eventSchema = new Schema({
   productionId: { type: Schema.Types.ObjectId, required: true, index: true },
   userId: { type: Schema.Types.ObjectId, required: true },
-  level: { type: String, enum: ["waiting", "processing", "success", "failure", "cancelled"], required: true },
+  level: { type: String, enum: ["waiting", "processing", "success", "failure", "cancelled", "review"], required: true },
   message: { type: String, required: true },
   stepKey: String
 }, { timestamps: true });

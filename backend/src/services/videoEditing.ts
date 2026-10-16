@@ -17,7 +17,7 @@ export function roughCut(production: any): EditorTimeline {
     for (const clip of scene.clips ?? []) {
       const duration = Math.min(clip.durationSeconds, scene.durationSeconds - coverage);
       if (duration < 0.1) continue;
-      clips.push({ id: randomUUID(), sceneId: scene.sceneId, label: scene.title || "Scene", kind: "video", assetId: clip.assetId, sourceIn: 0, duration, transition: "cut", text: "" }); coverage += duration;
+      clips.push({ id: randomUUID(), sceneId: scene.sceneId, label: scene.title || "Scene", kind: "video", assetId: clip.assetId, sourceAudio: clip.nativeAudio === true || !(scene.audio ?? []).some((a: any) => a.track === "dialogue"), sourceVolume: 1, sourceMuted: false, nativeDialogue: clip.nativeDialogue === true, sourceIn: 0, duration, transition: "cut", text: "" }); coverage += duration;
     }
     if (coverage < scene.durationSeconds - 0.05 && scene.imageAssetId) clips.push({ id: randomUUID(), sceneId: scene.sceneId, label: scene.title || "Scene", kind: "image", assetId: scene.imageAssetId, sourceIn: 0, duration: scene.durationSeconds - coverage, transition: "cut", text: "" });
     if (clips.length === first) editorFail(`Scene ${scene.title || scene.sceneId} has no generated visuals`);
@@ -85,14 +85,14 @@ export async function uploadEditorAudio(userId: string, projectId: string, bytes
 export function editingSuggestions(timeline: EditorTimeline) {
   const suggestions: any[] = [];
   timeline.clips.forEach(c => {
-    if (c.duration > 10 && !timeline.audio.some(a => a.anchorClipId === c.id)) suggestions.push({ id: `pace-${c.id}`, clipId: c.id, label: `Shorten “${c.label}” from ${c.duration.toFixed(1)}s to 6s`, reason: "This long shot has no anchored speech. Review for tighter pacing.", patch: { duration: 6 } });
+    if (!c.nativeDialogue && c.sourceAudio !== true && c.duration > 10 && !timeline.audio.some(a => a.anchorClipId === c.id)) suggestions.push({ id: `pace-${c.id}`, clipId: c.id, label: `Shorten “${c.label}” from ${c.duration.toFixed(1)}s to 6s`, reason: "This long shot has no anchored speech. Review for tighter pacing.", patch: { duration: 6 } });
     if (c.transition === "cut") suggestions.push({ id: `fade-${c.id}`, clipId: c.id, label: `Fade through black for “${c.label}”`, reason: "A short fade can separate scene boundaries without moving audio.", patch: { transition: "fade" } });
   });
   return suggestions.slice(0, 20);
 }
 export function captionsFromTranscript(timeline: EditorTimeline, assets: any[]) {
   const style = { font: "Arial" as const, size: 36, position: "bottom" as const, preset: "clean" as const };
-  return timeline.audio.filter(a => ["narration", "dialogue"].includes(a.role)).flatMap(a => {
+  const narration = timeline.audio.filter(a => ["narration", "dialogue"].includes(a.role)).flatMap(a => {
     const asset = assets.find(asset => String(asset._id) === a.assetId);
     const text = String(asset?.metadata?.transcript || asset?.prompt || "").trim();
     if (!text) return [];
@@ -103,7 +103,16 @@ export function captionsFromTranscript(timeline: EditorTimeline, assets: any[]) 
     return groups.flatMap((text, i) => {
       const sourceStart = i / groups.length * full, sourceEnd = (i + 1) / groups.length * full;
       const start = Math.max(sourceStart, a.sourceIn), end = Math.min(sourceEnd, a.sourceIn + a.duration);
-      return end > start ? [{ id: randomUUID(), text, start: a.start + start - a.sourceIn, end: a.start + end - a.sourceIn, anchorClipId: a.anchorClipId, style }] : [];
+      return end > start ? [{ id: randomUUID(), text, start: a.start + start - a.sourceIn, end: a.start + end - a.sourceIn, anchorClipId: a.anchorClipId, verification: "transcript" as const, style }] : [];
     });
   });
+  const native = timeline.clips.filter(c => c.kind === "video" && c.sourceAudio === true).flatMap(c => {
+    const asset = assets.find(a => String(a._id) === c.assetId);
+    const transcript = asset?.metadata?.verifiedTranscript;
+    if (!transcript?.text) return [];
+    // Only reviewed actual audio transcripts become native-dialogue captions.
+    const start = 0, end = c.duration;
+    return [{ id: randomUUID(), text: String(transcript.text).slice(0, 500), start, end, anchorClipId: c.id, verification: "transcript" as const, style }];
+  });
+  return [...narration, ...native];
 }

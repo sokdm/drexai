@@ -1,15 +1,15 @@
 # Phase 10 — Video editing and final MP4 export
 
-The editor imports AI Studio scene order, clips, still holds and measured narration/dialogue timing into a separate MongoDB `VideoEdit`. Studio productions remain intact. Open a Studio rough cut with **Continue to Editor**, or resume it from the editor's saved-edit list.
+The editor imports AI Studio scene order, native audiovisual clips, still holds and measured off-screen narration timing into a separate MongoDB `VideoEdit`. Studio productions remain intact. Open a Studio rough cut with **Continue to Editor**, or resume it from the editor's saved-edit list.
 
 ## Editing
 
 - Sequence and reorder clips by dragging or with Earlier / Later. Trim video using source-in and duration; adjust still durations; split at the playhead; delete clips or a whole scene. Add intro, outro or scene title cards.
-- Timeline zoom, ruler seeking, playback, multiple audio lanes, volume, mute, trim, global positioning, fade-in and fade-out operate on the saved timeline. Source video audio is deliberately excluded to avoid doubling generated narration. Add any wanted audio through the audio library.
+- Timeline zoom, ruler seeking, playback, multiple audio lanes, volume, mute, trim, global positioning, fade-in and fade-out operate on the saved timeline. New Studio rough cuts preserve Veo native video sound, and newly added video clips include their original sound by default. Source-in, duration and clip order drive both video and original audio. Clip properties expose original volume and mute. Existing saved edits keep their previous audio choices; enable original sound explicitly when appropriate. Separate TTS dialogue is never added to native-dialogue clips.
 - Speech imported from Studio is anchored to the first clip of its scene. Moving that anchor moves its speech and captions. Setting an explicit audio/caption start detaches that item from the clip. Deleting an anchor deletes its anchored items. Review audio after splitting or moving individual parts of a scene.
 - Save timeline persists to MongoDB. A revision conflict returns HTTP 409 rather than overwriting another tab's edits. Unsaved changes have a visible indicator and a browser-close warning. Undo/redo history is local to the open editor.
 - The music question offers upload, licensed library items, or no music. No commercial tracks are bundled. Music uploads require a usage-permission confirmation; library music requires recorded license confirmation or a license URL. Deployers can populate licensed assets with their own permission and attribution metadata.
-- Captions derive from saved speech text and measured audio duration. Phrase timings are estimates, not forced word alignment or speech recognition. Trimmed audio limits the generated caption intervals. Edit text, timing, font, size, position and clean / boxed / bold presets. Overlays are burned into final output with libass.
+- Narration captions derive from saved TTS text and measured duration; native dialogue captions use a creator-reviewed actual audio transcript entered during scene review. Intended dialogue alone is not assumed to match generated speech. Phrase timings are estimates, not forced word alignment or speech recognition. Trimmed audio limits the generated caption intervals. Edit text, timing, font, size, position and clean / boxed / bold presets. Overlays are burned into final output with libass.
 - Pacing and fade recommendations are explicitly labelled rule-based and reviewable. They do not call a paid AI provider or modify the timeline without Apply. Transitions support hard cuts and short fades through black, with no overlapping-time shift.
 
 ## Rendering setup

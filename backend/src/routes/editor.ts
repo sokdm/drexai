@@ -64,7 +64,7 @@ editorRouter.put("/edits/:id", wrap(async (req, res) => {
   res.json({ edit: updated });
 }));
 editorRouter.post("/edits/:id/suggestions", wrap(async (req, res) => { await own(req); const timeline = timelineSchema.parse(req.body.timeline); res.json({ suggestions: editingSuggestions(timeline), note: "Rule-based editing recommendations; review before applying." }); }));
-editorRouter.post("/edits/:id/captions", wrap(async (req, res) => { await own(req); const timeline = timelineSchema.parse(req.body.timeline); const assets = await validateTimelineAssets(timeline, String(req.user._id)); res.json({ captions: captionsFromTranscript(timeline, assets), note: "Phrase timing is estimated from the saved transcript and measured speech duration. Review timing before export." }); }));
+editorRouter.post("/edits/:id/captions", wrap(async (req, res) => { await own(req); const timeline = timelineSchema.parse(req.body.timeline); const assets = await validateTimelineAssets(timeline, String(req.user._id)); res.json({ captions: captionsFromTranscript(timeline, assets), note: "Phrase timing is estimated. Native dialogue captions require a user-reviewed actual audio transcript; intended script text is not treated as verified speech. Review timing before export." }); }));
 editorRouter.post("/edits/:id/audio", raw({ type: ["audio/*", "application/octet-stream"], limit: "100mb" }), wrap(async (req, res) => {
   const edit = await own(req), role = z.enum(["music", "sfx", "narration", "dialogue"]).parse(req.query.role);
   const name = decodeURIComponent(String(req.headers["x-file-name"] || "Uploaded audio"));

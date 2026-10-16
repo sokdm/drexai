@@ -7,6 +7,7 @@ export const captionStyleSchema = z.object({ font: z.enum(["Arial", "Georgia", "
 export const editorClipSchema = z.object({
   id: identifier, sceneId: z.string().max(80).optional(), label: z.string().max(150),
   kind: z.enum(["video", "image", "title"]), assetId: assetId.optional(),
+  sourceAudio: z.boolean().optional(), sourceVolume: z.number().min(0).max(1).optional(), sourceMuted: z.boolean().optional(), nativeDialogue: z.boolean().optional(),
   cropX: z.number().min(0).max(1).optional(),
   sourceIn: seconds.default(0), duration: z.number().finite().min(0.1).max(600),
   transition: z.enum(["cut", "fade"]).default("cut"), fit: z.enum(["contain", "cover"]).default("contain"),
@@ -19,7 +20,7 @@ export const editorAudioSchema = z.object({
   fadeIn: z.number().min(0).max(10).default(0), fadeOut: z.number().min(0).max(10).default(0),
   anchorClipId: identifier.optional(),
 });
-export const editorCaptionSchema = z.object({ id: identifier, text: z.string().min(1).max(500), start: seconds, end: seconds, anchorClipId: identifier.optional(), style: captionStyleSchema.default({}) }).refine(c => c.end > c.start, "Caption end must follow start");
+export const editorCaptionSchema = z.object({ id: identifier, text: z.string().min(1).max(500), start: seconds, end: seconds, anchorClipId: identifier.optional(), verification: z.enum(["transcript", "unverified_script", "manual"]).optional(), style: captionStyleSchema.default({}) }).refine(c => c.end > c.start, "Caption end must follow start");
 export const timelineSchema = z.object({
   clips: z.array(editorClipSchema).max(200), audio: z.array(editorAudioSchema).max(200), captions: z.array(editorCaptionSchema).max(1000),
   aspectRatio: z.enum(["16:9", "9:16", "1:1"]).default("16:9"), musicDecision: z.enum(["pending", "added", "none"]).default("pending"),

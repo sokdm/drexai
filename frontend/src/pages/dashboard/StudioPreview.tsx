@@ -39,7 +39,7 @@ export function StudioPreview({ timeline, urls, aspectRatio = "16:9" }: { timeli
   const ready = timeline.every(s => Boolean(urls[s.imageAssetId]) && s.clips.every((c: any) => Boolean(urls[c.assetId])) && s.audio.every((a: any) => Boolean(urls[a.assetId])));
   return <section aria-label="Rough cut preview" className="min-w-0">
     <div className="relative mx-auto grid max-h-[52vh] w-full place-items-center overflow-hidden bg-black" style={{ aspectRatio: aspectRatio.replace(":", "/"), maxWidth: aspectRatio === "9:16" ? 320 : undefined }}>
-      {clip && urls[clip.assetId] ? <video key={clip.assetId} ref={video} src={urls[clip.assetId]} playsInline muted={Boolean(scene?.audio.length)} preload="auto" onError={playbackError} className="h-full w-full object-contain" /> : scene && urls[scene.imageAssetId] ? <img src={urls[scene.imageAssetId]} alt={scene.title ?? "Scene preview"} className="h-full w-full object-contain" /> : <p className="p-6 text-sm text-zinc-400">Preview media is loading</p>}
+      {clip && urls[clip.assetId] ? <video key={clip.assetId} ref={video} src={urls[clip.assetId]} playsInline muted={clip.nativeAudio !== true && Boolean(scene?.audio.length)} preload="auto" onError={playbackError} className="h-full w-full object-contain" /> : scene && urls[scene.imageAssetId] ? <img src={urls[scene.imageAssetId]} alt={scene.title ?? "Scene preview"} className="h-full w-full object-contain" /> : <p className="p-6 text-sm text-zinc-400">Preview media is loading</p>}
       {track && urls[track.assetId] && <audio key={track.assetId} ref={audio} src={urls[track.assetId]} preload="auto" onError={playbackError} />}
     </div>
     <div className="mt-3 flex items-center gap-3">

@@ -25,3 +25,7 @@ Script generation, AI image generation, image-to-video generation, voiceovers, a
 ## Phase 6
 
 Video editor, publishing assistance, background worker, notifications, and collaboration workflows.
+
+## Targeted corrections for Phases 5, 7, 8, 9 and 10
+
+The current native video/audio requirements and migration behavior are specified in [NATIVE_AUDIO.md](NATIVE_AUDIO.md). These supersede earlier instructions to generate visible character speech through separate TTS or discard source video sound.

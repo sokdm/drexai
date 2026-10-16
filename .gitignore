@@ -19,3 +19,6 @@ uploads/
 *.p12
 *.pfx
 .npmrc
+
+# Paid provider smoke-test outputs and operation checkpoints
+backend/test-artifacts/native-veo-live/

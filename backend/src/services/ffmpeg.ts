@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 export function mediaBinary(tool: "ffmpeg" | "ffprobe"): string {
   return tool === "ffmpeg" ? env.FFMPEG_PATH || require("ffmpeg-static") : env.FFPROBE_PATH || require("ffprobe-static").path;
 }
-export function runMedia(tool: "ffmpeg" | "ffprobe", args: string[], options: { cwd?: string; signal?: AbortSignal; onProgress?: (seconds: number) => void; timeoutMs?: number } = {}): Promise<string> {
+export function runMedia(tool: "ffmpeg" | "ffprobe", args: string[], options: { cwd?: string; signal?: AbortSignal; onProgress?: (seconds: number) => void; timeoutMs?: number; includeStderr?: boolean } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(mediaBinary(tool), args, { cwd: options.cwd, windowsHide: true, shell: false, signal: options.signal, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", progress = "";
@@ -21,7 +21,7 @@ export function runMedia(tool: "ffmpeg" | "ffprobe", args: string[], options: { 
     });
     child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-8000); });
     child.on("error", error => { clearTimeout(timer); reject(error); });
-    child.on("close", code => { clearTimeout(timer); code === 0 ? resolve(stdout) : reject(new Error(`${tool} failed (${code}): ${stderr.slice(-2000)}`)); });
+    child.on("close", code => { clearTimeout(timer); code === 0 ? resolve(options.includeStderr ? stdout + "\n" + stderr : stdout) : reject(new Error(`${tool} failed (${code}): ${stderr.slice(-2000)}`)); });
   });
 }
 export async function probeMedia(file: string) {
@@ -78,12 +78,24 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
   const args = [...common, "-filter_complex_threads", "1", "-f", "concat", "-safe", "1", "-i", "segments.txt", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"];
   const tracks = timeline.audio.filter(a => !a.muted && a.volume > 0 && trackStart(timeline, a) < total);
   for (const audio of tracks) { const file = sources.get(audio.assetId); if (!file) throw new Error("Missing audio source"); args.push("-i", file); }
+  const nativeTracks: { inputIndex: number; sourceIn: number; duration: number; start: number; volume: number }[] = [];
+  let start = 0;
+  for (const clip of timeline.clips) {
+    if (clip.kind === "video" && clip.sourceAudio === true && !clip.sourceMuted && (clip.sourceVolume ?? 1) > 0) {
+      const file = sources.get(clip.assetId!); if (!file) throw new Error("Missing native audiovisual source");
+      const probe = await probeMedia(file);
+      if (!probe.audio && clip.nativeDialogue) throw new Error("Native dialogue clip has no audio track; regenerate or review before export");
+      if (probe.audio) { args.push("-i", file); nativeTracks.push({ inputIndex: tracks.length + nativeTracks.length + 2, sourceIn: clip.sourceIn, duration: clip.duration, start, volume: clip.sourceVolume ?? 1 }); }
+    }
+    start += clip.duration;
+  }
   const graphs = [`[1:a]atrim=duration=${total},asetpts=PTS-STARTPTS[base]`];
   tracks.forEach((a, i) => {
     const length = Math.min(a.duration, total - trackStart(timeline, a));
-    graphs.push(`[${i + 2}:a]atrim=start=${a.sourceIn}:duration=${length},asetpts=PTS-STARTPTS,aresample=48000,volume=${a.volume},afade=t=in:d=${Math.min(a.fadeIn, length)},afade=t=out:st=${Math.max(0, length - a.fadeOut)}:d=${Math.min(a.fadeOut, length)},adelay=${Math.round(trackStart(timeline, a) * 1000)}:all=1[a${i}]`);
+    graphs.push(`[${i + 2}:a]atrim=start=${a.sourceIn}:duration=${length},asetpts=PTS-STARTPTS,aresample=48000,volume=${a.volume}${a.fadeIn > 0 ? `,afade=t=in:d=${Math.min(a.fadeIn, length)}` : ""}${a.fadeOut > 0 ? `,afade=t=out:st=${Math.max(0, length - a.fadeOut)}:d=${Math.min(a.fadeOut, length)}` : ""},adelay=${Math.round(trackStart(timeline, a) * 1000)}:all=1[a${i}]`);
   });
-  graphs.push(`[base]${tracks.map((_, i) => `[a${i}]`).join("")}amix=inputs=${tracks.length + 1}:duration=first:normalize=0,alimiter=limit=0.95:level=false:latency=true[aout]`);
+  nativeTracks.forEach((a, i) => graphs.push(`[${a.inputIndex}:a:0]atrim=start=${a.sourceIn}:duration=${a.duration},asetpts=PTS-STARTPTS,aresample=48000,volume=${a.volume},adelay=${Math.round(a.start * 1000)}:all=1[n${i}]`));
+  graphs.push(`[base]${nativeTracks.map((_, i) => `[n${i}]`).join("")}${tracks.map((_, i) => `[a${i}]`).join("")}amix=inputs=${tracks.length + nativeTracks.length + 1}:duration=first:normalize=0,alimiter=limit=0.95:level=false:latency=true[aout]`);
   args.push("-filter_complex", graphs.join(";"), "-vf", "ass=captions.ass", "-map", "0:v:0", "-map", "[aout]", "-t", String(total), "-c:v", "libx264", "-preset", "veryfast", "-crf", String({ draft: 28, standard: 23, high: 18 }[settings.quality]), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-progress", "pipe:1", "output.mp4");
   await runMedia("ffmpeg", args, { cwd: directory, signal, onProgress: seconds => onProgress(50 + Math.min(1, seconds / total) * 40) });
   const output = path.join(directory, "output.mp4"), info = await probeMedia(output), size = (await stat(output)).size;

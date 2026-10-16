@@ -1,3 +1,4 @@
+import { sceneDialogue, segmentDialogue, needsNarration } from "./sceneAudio.js";
 import { z } from "zod";
 import { imageModels, validateImageSettings } from "./imageGeneration.js";
 import { videoModels, validateVideoSettings, planClipDurations } from "./videoGeneration.js";
@@ -46,11 +47,7 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
   }
   if (settings.narration) for (const scene of scenes) {
     const segments = [];
-    if (scene.narration?.trim()) segments.push({ text: scene.narration.trim(), speaker: "Narrator", track: "narration" });
-    if (scene.dialogue?.trim()) for (const line of scene.dialogue.split(/\n+/).filter((s: string) => s.trim())) {
-      const match = line.match(/^([^:]{1,80}):\s*(.+)$/);
-      segments.push({ text: match ? match[2] : line, speaker: match ? match[1].trim() : "Narrator", track: "dialogue" });
-    }
+    if (needsNarration(scene)) segments.push({ text: scene.narration.trim(), speaker: "Narrator", track: "narration" });
     if (segments.length > 50) throw new Error("A scene supports up to 50 speech segments");
     segments.forEach((segment, index) => {
       const character = snapshot.characters.find(c => c.name === segment.speaker);
@@ -63,7 +60,18 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
   if (settings.video) for (const scene of scenes) {
     if (!scene.videoMotionPrompt?.trim()) throw new Error(`Scene ${scene.order} needs a motion prompt`);
     const durationSeconds = videoModels.find(m => m.id === settings.videoModel)!.durations[0];
-    for (let index = 0; index < settings.maxClipsPerScene; index++) add(scene, "video", `-${index}`, validateVideoSettings({ motionPrompt: scene.videoMotionPrompt, sourceImageAssetId: "resolved-at-execution", model: settings.videoModel, aspectRatio: settings.aspectRatio, durationSeconds, quality: settings.quality, quantity: 1, clipIndex: index }), `video clip ${index + 1}`);
+    const lines = sceneDialogue(scene);
+    const segments = segmentDialogue(lines, durationSeconds);
+    if (segments.length > settings.maxClipsPerScene) throw new Error(`Scene ${scene.order} needs ${segments.length} dialogue clips. Split it into more scenes or increase the clip limit before approving costs.`);
+    const characters = snapshot.characters.filter(c => (scene.characters ?? []).includes(c.name));
+    const count = lines.length ? segments.length : settings.maxClipsPerScene;
+    for (let index = 0; index < count; index++) add(scene, "video", `-${index}`, validateVideoSettings({
+      ...scene, motionPrompt: scene.videoMotionPrompt, dialogueLines: segments[index] ?? [],
+      characterDescriptions: characters.map(c => `${c.name}: ${c.appearance || ""}; ${c.clothing || ""}; voice guidance: ${c.voiceDescription || c.personality || "natural"}`).join("\n"),
+      sourceImageAssetId: "resolved-at-execution", model: settings.videoModel, aspectRatio: settings.aspectRatio,
+      durationSeconds, quality: settings.quality, quantity: 1, clipIndex: index, nativeAudio: true, nativeDialogue: lines.length > 0
+    }), `video and native audio ${index + 1}`);
+
   }
   return steps;
 }
@@ -72,7 +80,8 @@ export function sceneDuration(sceneId: string, steps: StudioStep[], assets: any[
   const assetIds = new Set(steps.filter(s => s.sceneId === sceneId && s.kind === "audio" && s.status === "completed").map(s => String(s.assetId)));
   const duration = assets.filter(a => assetIds.has(String(a._id))).reduce((sum, asset) => sum + Number(asset.durationSeconds), 0);
   if (!Number.isFinite(duration)) throw new Error("Invalid measured speech duration");
-  return duration > 0 ? duration : fallbackSeconds;
+  const native = steps.filter(s => s.sceneId === sceneId && s.kind === "video" && s.input.nativeDialogue).reduce((sum, step) => sum + Number(step.input.durationSeconds), 0);
+  return Math.max(duration > 0 ? duration : native > 0 ? native : fallbackSeconds, native);
 }
 
 export function requiredClips(seconds: number, settings: StudioSettings) {
@@ -96,8 +105,8 @@ export function makeTimeline(snapshot: StudioSnapshot, settings: StudioSettings,
     const clips = completed.filter(s => s.kind === "video").map(step => {
       const asset = assets.find(a => String(a._id) === step.assetId);
       if (!asset || !(asset.durationSeconds > 0)) throw new Error("Missing video asset");
-      const length = Math.max(0, Math.min(asset.durationSeconds, durationSeconds - videoOffset));
-      const clip = { assetId: step.assetId, startSeconds: videoOffset, durationSeconds: length };
+      const length = step.input.nativeDialogue ? asset.durationSeconds : Math.max(0, Math.min(asset.durationSeconds, durationSeconds - videoOffset));
+      const clip = { assetId: step.assetId, startSeconds: videoOffset, durationSeconds: length, nativeAudio: step.input.nativeAudio === true, nativeDialogue: step.input.nativeDialogue === true, review: asset.metadata?.audioReview };
       videoOffset += length; return clip;
     }).filter(clip => clip.durationSeconds > 0);
     const item = { sceneId: id, order: scene.order, title: scene.title, startSeconds: offset, durationSeconds, imageAssetId: completed.find(s => s.kind === "image")?.assetId, clips, audio, holdSeconds: Math.max(0, durationSeconds - videoOffset), transition: "cut", suggestedTransition: scene.transitionSuggestions ?? "cut" };

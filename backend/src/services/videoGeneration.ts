@@ -1,20 +1,28 @@
+import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
+import { buildVeoPrompt, sceneAudioFields, segmentDialogue } from "./sceneAudio.js";
+import { z } from "zod";
+import { inspectNativeVideo } from "./nativeAudio.js";
 import { withProvider } from "./platformControl.js";
 import { env } from "../config/env.js";
 
 export const videoModels = [
-  { id: "veo-3.1-generate-preview", label: "Veo 3.1", aspectRatios: ["16:9", "9:16"], durations: [8], qualities: ["720p", "1080p", "4K"], maxQuantity: 2, imageToVideo: true }
+  { id: "veo-3.1-generate-preview", label: "Veo 3.1", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4], qualities: ["720p", "1080p", "4K"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }
 ];
 
 export function validateVideoSettings(input: any) {
-  const model = videoModels.find((item) => item.id === input.model) ?? videoModels[0];
+  const model = videoModels.find((item) => item.id === input.model);
+  if (!model) throw new Error("Unsupported Veo model");
   if (!model.aspectRatios.includes(input.aspectRatio)) throw new Error("Unsupported aspect ratio for selected Veo model");
   if (!model.durations.includes(Number(input.durationSeconds))) throw new Error("Unsupported duration for selected Veo model");
   if (!model.qualities.includes(input.quality)) throw new Error("Unsupported output quality for selected Veo model");
+  if (input.quality !== "720p" && Number(input.durationSeconds) !== 8) throw new Error("1080p and 4K Veo output require an eight-second clip");
   const quantity = Number(input.quantity ?? 1);
   if (quantity < 1 || quantity > model.maxQuantity) throw new Error(`Selected model supports 1-${model.maxQuantity} outputs`);
   if (!String(input.motionPrompt ?? "").trim()) throw new Error("Motion prompt is required");
   if (!input.sourceImageAssetId && !input.sourceImageUrl) throw new Error("Select or upload a source image first");
-  return { ...input, model: model.id, quantity, durationSeconds: Number(input.durationSeconds) };
+  const audio = z.object(sceneAudioFields).parse(input);
+  if (segmentDialogue(audio.dialogueLines ?? [], Number(input.durationSeconds)).length > 1) throw new Error("Dialogue is too long for this clip. Use at most 14 words per 8 seconds, or divide it into Studio scenes.");
+  return { ...input, ...audio, model: model.id, quantity, durationSeconds: Number(input.durationSeconds), nativeAudio: true };
 }
 
 export function planClipDurations(targetSeconds: number, modelId = env.VEO_MODEL) {
@@ -32,35 +40,35 @@ export function videoCreditCost(settings: any) {
 export async function createVeoOperation(settings: any) { return withProvider(settings.model, () => createVeoOperationUnchecked(settings)); }
 async function createVeoOperationUnchecked(settings: any) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
-  const body: any = {
-    instances: [{ prompt: settings.motionPrompt, ...(settings.sourceImageBytes ? { image: { inlineData: { data: settings.sourceImageBytes, mimeType: settings.sourceImageMimeType ?? "image/png" } } } : {}) }],
-    parameters: { aspectRatio: settings.aspectRatio, sampleCount: settings.quantity, durationSeconds: settings.durationSeconds, resolution: String(settings.quality).toLowerCase() }
-  };
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:predictLongRunning`, {
-    method: "POST",
-    headers: { "x-goog-api-key": env.GEMINI_API_KEY, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(60000),
-    body: JSON.stringify(body)
-  });
-  const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(data.error?.message ?? "Veo request failed"), { providerRejected: response.status < 500 });
-  if (!data.name) throw new Error("Veo did not return an operation ID");
-  return data.name as string;
+  try {
+    const operation = await veoClient().models.generateVideos(veoRequest(settings));
+    if (!operation.name) throw new Error("Veo did not return an operation ID");
+    return operation.name;
+  } catch (error: any) { if (error.status && error.status < 500) error.providerRejected = true; throw error; }
 }
-
+export function veoRequest(settings: any) {
+  return {
+    model: settings.model, prompt: buildVeoPrompt(settings),
+    ...(settings.sourceImageBytes ? { image: { imageBytes: settings.sourceImageBytes, mimeType: settings.sourceImageMimeType ?? "image/png" } } : {}),
+    config: { aspectRatio: settings.aspectRatio, numberOfVideos: settings.quantity, durationSeconds: settings.durationSeconds, resolution: String(settings.quality).toLowerCase() }
+  };
+}
+function veoClient() {
+  // Native audio is inherent to this Veo model. No unsupported generateAudio or voice-ID parameter.
+  return new GoogleGenAI({ apiKey: env.GEMINI_API_KEY!, httpOptions: { timeout: 60000, retryOptions: { attempts: 1 } } });
+}
 export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 60 * 1000) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
-  const started = Date.now();
+  if (!/^(?:models\/[\w.-]+\/)?operations\/[\w.-]+$/.test(operationName)) throw new Error("Invalid provider operation name");
+  const started = Date.now(), client = veoClient();
+  let operation = new GenerateVideosOperation(); operation.name = operationName;
   while (Date.now() - started < timeoutMs) {
-    if (!/^(?:models\/[\w.-]+\/)?operations\/[\w.-]+$/.test(operationName)) throw new Error("Invalid provider operation name");
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${operationName}`, { headers: { "x-goog-api-key": env.GEMINI_API_KEY }, signal: AbortSignal.timeout(30000) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message ?? "Veo polling failed");
-    if (data.done && data.error) throw Object.assign(new Error(data.error.message ?? "Veo generation failed"), { providerRejected: true });
-    if (data.done) return data;
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+    operation = await client.operations.getVideosOperation({ operation });
+    if (operation.done && operation.error) throw Object.assign(new Error(String(operation.error.message ?? "Veo generation failed")), { providerRejected: true });
+    if (operation.done) return operation;
+    await new Promise(resolve => setTimeout(resolve, 10000));
   }
-  throw new Error("Veo generation timed out");
+  throw new Error("Veo generation timed out; existing operation can be resumed without submitting another generation");
 }
 
 export async function downloadVeoVideos(operation: any) {
@@ -77,6 +85,7 @@ export async function downloadVeoVideos(operation: any) {
     }
   }
   if (outputs.length === 0) throw new Error("Veo returned no downloadable videos");
+  for (const output of outputs) output.metadata = { ...output.metadata, ...await inspectNativeVideo(output.buffer) };
   return outputs;
 }
 

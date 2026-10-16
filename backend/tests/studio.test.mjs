@@ -45,7 +45,7 @@ function wav(seconds) {
   b.write("data", 36); b.writeUInt32LE(bytes, 40); return b;
 }
 function snapshot() {
-  return { title: "Two scene test", characters: [{ name: "Guide", appearance: "Green jacket", clothing: "Boots", voicePreference: "Puck" }], scenes: [2, 1].map(order => ({ _id: String(new mongoose.Types.ObjectId()), order, title: `Scene ${order}`, approved: true, imagePrompt: `Original image ${order}`, videoMotionPrompt: `Slow camera ${order}`, narration: `Narration ${order}`, dialogue: order === 1 ? "Guide: Welcome." : "", characters: ["Guide"] })) };
+  return { title: "Two scene test", characters: [{ name: "Guide", appearance: "Green jacket", clothing: "Boots", voicePreference: "Puck" }], scenes: [2, 1].map(order => ({ _id: String(new mongoose.Types.ObjectId()), order, title: `Scene ${order}`, approved: true, imagePrompt: `Original image ${order}`, videoMotionPrompt: `Slow camera ${order}`, narration: `Narration ${order}`, offscreenNarration: true, dialogue: order === 1 ? "Guide: Welcome." : "", characters: ["Guide"] })) };
 }
 async function fixture(settingsInput = {}, overrides = {}) {
   const userId = new mongoose.Types.ObjectId();
@@ -63,7 +63,7 @@ async function fixture(settingsInput = {}, overrides = {}) {
     speech: async input => { calls.speech.push(input); const buffer = wav(input.text === "Narration 1" ? 20 : input.text === "Welcome." ? 4 : 12); return { buffer, durationSeconds: wavDuration(buffer), contentType: "audio/wav", providerData: { usage: { test: true } } }; },
     createVideo: async input => { calls.video.push(input); assert.ok(input.sourceImageBytes); return `operations/test-${calls.video.length}`; },
     pollVideo: async name => { calls.poll.push(name); return { name, done: true }; },
-    downloadVideo: async () => [{ buffer: Buffer.from("video fixture"), contentType: "video/mp4", metadata: {} }],
+    downloadVideo: async () => [{ buffer: Buffer.from("video fixture"), contentType: "video/mp4", metadata: { nativeAudio: true, durationSeconds: 8, audioReview: { status: "needs_review", audioTrackDetected: true } } }],
     read: async key => objects.get(key) ?? null,
     uploadImage: upload, uploadAudio: upload, uploadVideo: upload, ...overrides
   };
@@ -80,7 +80,9 @@ test("planning preserves chronology, character context, voices, and duration cap
   const steps = buildStudioSteps(snapshot(), settings);
   assert.deepEqual(steps.filter(s => s.kind === "image").map(s => s.sceneOrder), [1, 2]);
   assert.match(steps[0].input.prompt, /Green jacket/);
-  assert.equal(steps.find(s => s.input.speaker === "Guide").input.voiceId, "Puck");
+  assert.equal(steps.find(s => s.input.speaker === "Narrator").input.voiceId, "Kore");
+  assert.ok(!steps.some(s => s.kind === "audio" && s.input.track === "dialogue"));
+  assert.equal(steps.find(s => s.kind === "video" && s.sceneOrder === 1).input.dialogueLines[0].speaker, "Guide");
   assert.equal(requiredClips(24, settings), 3);
   assert.equal(requiredClips(60, settings), 3);
   const invalid = snapshot(); invalid.scenes[0].approved = false;
@@ -116,14 +118,14 @@ test("multi-scene production stores correct assets, releases unused credits, and
   await runStudioProduction(String(f.production._id), f.providers);
   const p = await StudioProduction.findById(f.production._id);
   assert.equal(p.status, "completed"); assert.deepEqual(p.timeline.map(s => s.order), [1, 2]);
-  assert.deepEqual(p.timeline.map(s => s.durationSeconds), [24, 12]);
-  assert.deepEqual(p.timeline.map(s => s.clips.length), [3, 2]);
-  assert.equal(p.timeline[1].startSeconds, 24);
+  assert.deepEqual(p.timeline.map(s => s.durationSeconds), [20, 12]);
+  assert.deepEqual(p.timeline.map(s => s.clips.length), [1, 2]);
+  assert.equal(p.timeline[1].startSeconds, 20);
   assert.equal(p.timeline[1].clips[1].durationSeconds, 4);
   const assets = await MediaAsset.find({ productionId: p._id });
   for (const step of p.steps.filter(s => s.assetId)) assert.equal(assets.find(a => String(a._id) === step.assetId).sceneId, step.sceneId);
   const w = await Wallet.findOne({ userId: f.userId });
-  assert.equal(w.reservedCredits, 0); assert.equal(w.spentCredits, 20); assert.equal(w.availableCredits, 980);
+  assert.equal(w.reservedCredits, 0); assert.equal(w.spentCredits, 14); assert.equal(w.availableCredits, 986);
   assert.equal((await AIProject.findById(f.project._id)).productionTimeline.length, 2);
   assert.ok(await StudioEvent.exists({ productionId: p._id, message: "Your video production is ready for review." }));
   await runStudioProduction(String(p._id), f.providers); assert.equal(f.calls.image.length, 2);
@@ -253,4 +255,14 @@ test("API requires authentication, blocks foreign productions, and can replay pe
   const chunk = await stream.body.getReader().read();
   assert.match(new TextDecoder().decode(chunk.value), new RegExp(String(e._id))); controller.abort();
   const again = await fetch(`${base}/productions/${f.production._id}`, { headers }); assert.equal((await again.json()).events[0].message, "Saved real event");
+});
+
+test("incomplete native audio requires review and never automatically charges or regenerates", async () => {
+ const f = await fixture({ narration: false, targetSeconds: 8, maxClipsPerScene: 1 }, { downloadVideo: async () => [{ buffer: Buffer.from("missing soundtrack"), contentType: "video/mp4", metadata: {} }] });
+ await runStudioProduction(String(f.production._id), f.providers);
+ const production = await StudioProduction.findById(f.production._id);
+ assert.equal(production.status, "needs_review"); assert.match(production.error, /incomplete/);
+ const failed = production.steps.find(s => s.kind === "video" && s.status === "needs_review"); assert.ok(failed); assert.equal(failed.charged, undefined);
+ const calls = f.calls.video.length; await runStudioProduction(String(production._id), f.providers); assert.equal(f.calls.video.length, calls);
+ assert.ok(!f.calls.speech.length); assert.equal((await Wallet.findOne({ userId: f.userId })).spentCredits, 4);
 });

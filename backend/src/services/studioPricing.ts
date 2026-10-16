@@ -32,6 +32,6 @@ export async function priceStudioSteps(steps: StudioStep[]) {
     maxClips: steps.filter(s => s.kind === "video" && !s.reused).length,
     maxVideoSeconds: steps.filter(s => s.kind === "video" && !s.reused).reduce((sum, s) => sum + s.input.durationSeconds, 0),
     renderCredits: 0, renderMode: "browser-timeline",
-    coverage: "Measured audio determines clip usage. Extra duration uses a still-image hold. Unused clip credits are released."
+    coverage: "Veo clip pricing includes native dialogue and environmental audio. Only requested off-screen narration adds TTS costs. Dialogue clips remain whole; unused ambient clip credits are released."
   };
 }

@@ -71,7 +71,7 @@ studioRouter.post("/plans", wrap(async (req, res) => {
     for (const step of steps) {
       const old = source.steps.find((s: StudioStep) => s.key === step.key);
       const dependsOnSelection = step.key === selected.key || (step.sceneId === selected.sceneId && step.kind === "video" && selected.kind !== "video");
-      if (old?.status === "completed" && old.assetId && !dependsOnSelection) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
+      if (old?.status === "completed" && old.assetId && !dependsOnSelection && (step.kind !== "video" || old.input.nativeAudio === true) && (step.kind !== "audio" || old.input.track === step.input.track)) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
     }
   }
   const estimate = await priceStudioSteps(steps);
@@ -185,4 +185,16 @@ studioRouter.get("/productions/:id/events", wrap(async (req, res) => {
   const expiry = setTimeout(() => res.end(), 5 * 60000);
   req.on("close", () => { closed = true; clearInterval(timer); clearTimeout(expiry); });
   await flush();
+}));
+
+studioRouter.post("/assets/:assetId/audio-review", wrap(async (req, res) => {
+  const input = z.object({ status: z.enum(["accepted", "issue"]), note: z.string().max(1000).default(""), transcript: z.string().max(8000).optional() }).parse(req.body);
+  const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, type: "video", deletedAt: null });
+  if (!asset || !asset.metadata?.nativeAudio) fail("Native audiovisual asset not found", 404);
+  const review = { ...asset!.metadata.audioReview, status: input.status, note: input.note, reviewedAt: new Date().toISOString(), reviewedBy: String(req.user._id), method: "user_review" };
+  asset!.set("metadata.audioReview", review);
+  if (input.transcript !== undefined) asset!.set("metadata.verifiedTranscript", { text: input.transcript, source: "user_listened_to_audio", reviewedAt: new Date().toISOString() });
+  await asset!.save();
+  if (asset!.productionId) await studioLog({ _id: asset!.productionId, userId: req.user._id }, "review", "Native audio review: " + input.status + (input.note ? ". " + input.note : ""), asset!.productionStepKey || undefined);
+  res.json({ asset: asset!.toObject() });
 }));

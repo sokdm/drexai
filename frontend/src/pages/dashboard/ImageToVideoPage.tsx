@@ -18,7 +18,7 @@ export function ImageToVideoPage() {
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
   const library = useRef<HTMLDialogElement>(null);
-  const [form, setForm] = useState<any>({ sourceImageAssetId: params.get("imageId") ?? "", motionPrompt: "", model: "veo-3.1-generate-preview", aspectRatio: "16:9", durationSeconds: 8, quality: "720p", quantity: 1 });
+  const [form, setForm] = useState<any>({ sourceImageAssetId: params.get("imageId") ?? "", motionPrompt: "", model: "veo-3.1-generate-preview", aspectRatio: "16:9", durationSeconds: 8, quality: "720p", quantity: 1, dialogueText: "", dialogueLines: [], dialogueLanguage: "English", preferredAccent: "", characterActions: "", cameraDirection: "", environmentalSounds: "", soundEffects: "", backgroundAmbience: "" });
   const selectedModel = config.models.find((model: any) => model.id === form.model) ?? config.models[0];
   const selectedImage = config.images.find((image: any) => image._id === form.sourceImageAssetId);
   const load = useCallback(async () => {
@@ -50,10 +50,11 @@ export function ImageToVideoPage() {
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
+      const settings = { ...form, dialogueLines: String(form.dialogueText || "").split("\n").filter(line => line.trim()).map(line => { const colon = line.indexOf(":"); return { speaker: colon >= 0 ? line.slice(0, colon).trim() : "Speaker", text: colon >= 0 ? line.slice(colon + 1).trim() : line.trim() }; }) };
       if (!quote) {
-        const data = await api<any>("/api/videos/quote", { method: "POST", body: JSON.stringify(form) }); setQuote(data.quote);
+        const data = await api<any>("/api/videos/quote", { method: "POST", body: JSON.stringify(settings) }); setQuote(data.quote);
       } else {
-        await api("/api/videos/generate", { method: "POST", body: JSON.stringify({ ...form, approvedCredits: quote.credits }) });
+        await api("/api/videos/generate", { method: "POST", body: JSON.stringify({ ...settings, approvedCredits: quote.credits }) });
         setQuote(null); await load();
       }
     } catch (err) { setError(err instanceof Error ? err.message : "Video request failed"); }
@@ -61,7 +62,7 @@ export function ImageToVideoPage() {
   }
   function reuse(asset: any) {
     const job = jobs.find(job => job._id === asset.jobId);
-    setForm({ ...form, ...(job ? { sourceImageAssetId: job.sourceImageAssetId, model: job.model, aspectRatio: job.aspectRatio, durationSeconds: job.durationSeconds, quality: job.quality, quantity: job.quantity } : {}), motionPrompt: asset.prompt ?? "" });
+    setForm({ ...form, ...(job ?? {}), dialogueText: (job?.dialogueLines ?? []).map((line: any) => line.speaker + ": " + line.text).join("\n"), motionPrompt: asset.prompt ?? "" });
     setQuote(null); window.scrollTo({ top: 0, behavior: "smooth" });
   }
   async function remove(asset: any) {
@@ -88,6 +89,7 @@ export function ImageToVideoPage() {
             {selectedImage && <p className="source-caption"><Check size={12} />{selectedImage.metadata?.name || "Library image"}{selectedImage.width ? ` / ${selectedImage.width} x ${selectedImage.height}` : ""}</p>}
           </div>
           <div className="control-section"><label className="compact-label">2. Motion prompt<textarea required minLength={3} maxLength={4000} value={form.motionPrompt} onChange={e => update("motionPrompt", e.target.value)} placeholder="Describe movement, camera direction, and atmosphere..." className="compact-input prompt-input" /></label></div>
+          <details className="control-section"><summary>Dialogue and native sound</summary><p className="mt-2 text-xs text-slate-500">Veo generates speech and sound with the video. Use up to 14 spoken words for an eight-second clip. Words, voice consistency and lip-sync require review.</p><label className="compact-label mt-3">Dialogue (one Speaker: line per turn)<textarea className="compact-input" value={form.dialogueText || ""} onChange={e => update("dialogueText", e.target.value)} /></label>{([['dialogueLanguage', 'Dialogue language'], ['preferredAccent', 'Accent preference'], ['emotionAndDelivery', 'Emotion and delivery'], ['characterDescriptions', 'Character descriptions'], ['characterActions', 'Character actions'], ['cameraDirection', 'Camera direction'], ['environmentalSounds', 'Environmental sounds'], ['soundEffects', 'Sound effects'], ['backgroundAmbience', 'Background ambience']] as const).map(([key, label]) => <label className="compact-label mt-3" key={key}>{label}<input className="compact-input" value={form[key] || ""} onChange={e => update(key, e.target.value)} /></label>)}</details>
           <div className="control-section">
             <h2 className="mb-3">3. Video settings</h2>
             <Select label="Model" value={form.model} options={config.models.map((m: any) => m.id)} labels={Object.fromEntries(config.models.map((m: any) => [m.id, m.label || m.id]))} onChange={value => { const model = config.models.find((m: any) => m.id === value); setForm({ ...form, model: value, aspectRatio: model.aspectRatios[0], durationSeconds: model.durations[0], quality: model.qualities[0], quantity: 1 }); setQuote(null); }} />

@@ -26,9 +26,10 @@ export async function processVideoJob(jobId: string) {
     const assets = [];
     for (let index = 0; index < outputs.length; index += 1) {
       const output = outputs[index];
+      if (Math.abs(output.metadata.durationSeconds - Number(job.durationSeconds)) > 0.5) throw new Error("Veo output duration does not match the requested clip. Review before regenerating.");
       const key = `${job.userId}/videos/${job._id}-${index}.mp4`;
       const stored = await uploadVideo(output.buffer, key, output.contentType);
-      assets.push(await MediaAsset.create({ userId: job.userId, projectId: job.projectId, jobId: job._id, type: "video", prompt: job.motionPrompt, provider: job.provider, model: job.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, durationSeconds: job.durationSeconds, metadata: { aspectRatio: job.aspectRatio, quality: job.quality, provider: output.metadata } }));
+      assets.push(await MediaAsset.create({ userId: job.userId, projectId: job.projectId, jobId: job._id, type: "video", prompt: job.motionPrompt, provider: job.provider, model: job.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, durationSeconds: output.metadata.durationSeconds, width: output.metadata.width, height: output.metadata.height, sceneId: job.sceneId, metadata: { nativeAudio: true, nativeDialogue: Boolean(job.dialogueLines?.length), audioReview: output.metadata.audioReview, intendedDialogue: job.dialogueLines, aspectRatio: job.aspectRatio, quality: job.quality, provider: output.metadata } }));
     }
     job.status = "completed";
     job.progress = 100;

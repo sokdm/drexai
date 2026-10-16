@@ -134,7 +134,7 @@ aiRouter.post("/scripts/generate", async (req, res, next) => {
     const generated = await geminiJson({
       model: quote.model, maxOutputTokens: 12000,
       schema: scriptProjectSchema,
-      system: "Create original, structured YouTube scripts. Return a JSON object with title, storyConcept, summary, characters (array) and scenes (array). Each scene must include order (number), title, sceneDescription, characters (string array), narration, dialogue, imagePrompt, videoMotionPrompt, cameraDirection, estimatedNarrationTiming, audioSuggestions and transitionSuggestions. All fields except order and characters are strings. Keep the result to at most 12 practical scenes. Keep content appropriate for a general audience.",
+      system: "Create original, structured YouTube scripts. Return a JSON object with title, storyConcept, summary, characters (array) and scenes (array). Each scene must include order (number), title, sceneDescription, characters (string array), narration, dialogue, imagePrompt, videoMotionPrompt, cameraDirection, estimatedNarrationTiming, audioSuggestions and transitionSuggestions. Keep the existing string fields for compatibility. Also include dialogueLines as an ordered array of objects {speaker, text, language, accent, emotion, delivery}, dialogueLanguage, preferredAccent, emotionAndDelivery, characterActions, cameraPosition, cameraMovements, environmentalSounds, soundEffects, backgroundAmbience, estimatedDurationSeconds (number), visibleSpeakingCharacters (boolean), offscreenNarration (boolean). Identify every speaker and quote exact intended speech. Each dialogue scene must fit an eight-second Veo native audiovisual clip, at most 14 spoken words; divide longer conversations into sequential scenes. Do not put the same speech in narration and dialogue. Set offscreenNarration true only for a separate narrator. Voice preferences are descriptive guidance, never guaranteed cloning. Keep the result to at most 12 practical scenes. Keep content appropriate for a general audience.",
       prompt: `Generate a structured project with scene-level prompts. Settings: ${JSON.stringify(input.settings)}\nNiche: ${JSON.stringify(niche)}`
     });
     const project = await AIProject.create({
@@ -164,8 +164,11 @@ aiRouter.post("/scripts/generate", async (req, res, next) => {
 aiRouter.patch("/projects/:id/scenes", async (req, res) => {
   const project = await AIProject.findOne({ _id: req.params.id, userId: req.user._id });
   if (!project) return res.status(404).json({ error: "Project not found" });
+  const validated = z.array(scriptProjectSchema.shape.scenes.element.partial().extend({ order: z.number().int().positive(), _id: z.string().regex(/^[a-f\d]{24}$/i).optional(), approved: z.boolean().optional() })).min(1).max(50).safeParse(req.body.scenes);
+  if (!validated.success) return res.status(400).json({ error: "Review the scene fields before saving: " + validated.error.issues[0].path.join(".") });
+  const scenes = validated.data;
   project.versions.push({ label: `Version ${project.versions.length + 1}`, scenes: project.scenes });
-  project.scenes = req.body.scenes;
+  project.scenes = scenes as any;
   project.approvedAt = undefined;
   project.aiStudioReadyAt = undefined;
   project.scenes.forEach(scene => { scene.approved = false; });

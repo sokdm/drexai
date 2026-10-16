@@ -1,3 +1,4 @@
+import { sceneAudioFields } from "./sceneAudio.js";
 import { geminiFetch } from "./geminiRequest.js";
 import { geminiSchema } from "./geminiSchema.js";
 import { withProvider, defaultModel } from "./platformControl.js";
@@ -35,6 +36,7 @@ export const scriptProjectSchema = z.object({
     voicePreference: z.string().optional()
   })).default([]),
   scenes: z.array(z.object({
+    ...sceneAudioFields,
     order: z.number(),
     title: z.string(),
     sceneDescription: z.string(),

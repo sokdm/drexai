@@ -1,3 +1,5 @@
+import { sceneAudioFields } from "../services/sceneAudio.js";
+import { AIProject } from "../models/AIProject.js";
 import { configuredModels } from "../services/platformControl.js";
 import { managedPrice, rememberQuote, approvedTerms } from "../services/managedPricing.js";
 import { Router, raw } from "express";
@@ -17,13 +19,16 @@ export const videosRouter = Router();
 videosRouter.use(requireAuth, requireCsrf);
 
 const requestSchema = z.object({
+  ...sceneAudioFields,
+  characterDescriptions: z.string().max(4000).optional(), cameraDirection: z.string().max(1000).optional(),
+  sceneId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   sourceImageAssetId: z.string().regex(/^[a-f\d]{24}$/i, "Upload or select an image first"),
   motionPrompt: z.string().min(3).max(4000),
   model: z.string(),
   aspectRatio: z.string(),
   durationSeconds: z.number(),
   quality: z.string(),
-  quantity: z.number().int().min(1).max(2),
+  quantity: z.number().int().min(1).max(1),
   projectId: z.string().optional(),
   approvedCredits: z.number().optional()
 });
@@ -69,6 +74,8 @@ videosRouter.post("/generate", async (req, res, next) => {
     if (settings.approvedCredits !== credits) return res.status(400).json({ error: `Approve ${credits} credits before generating.` });
     const source = settings.sourceImageAssetId ? await MediaAsset.findOne({ _id: settings.sourceImageAssetId, userId: req.user._id, type: "image", deletedAt: null }) : null;
     if (settings.sourceImageAssetId && !source) return res.status(404).json({ error: "Source image not found" });
+    if (settings.projectId && !await AIProject.exists({ _id: settings.projectId, userId: req.user._id, ...(settings.sceneId ? { "scenes._id": settings.sceneId } : {}) })) return res.status(404).json({ error: "Project scene not found" });
+    if (settings.sceneId && !settings.projectId) return res.status(400).json({ error: "A scene requires its project" });
     await assertVideoQueueReady();
     reservation = await reserveCredits(String(req.user._id), terms, `video:${req.user._id}:${Date.now()}:${settings.motionPrompt.slice(0, 24)}`);
     job = await VideoGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: "google-veo", status: "queued", approvedCredits: credits });
