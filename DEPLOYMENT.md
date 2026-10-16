@@ -47,7 +47,7 @@ Your R2 bucket and SMTP credentials were successfully checked locally before thi
 
 1. In Render choose **New → Blueprint**, select `sokdm/drexai`, branch `main`, and `render.yaml`.
 2. Review all services and plan costs. The template creates the web service, Key Value, and Studio/image/video/render/creative background workers. Rendering and creative processing need adequate memory and scratch disk for large media.
-3. The repository root contains the workspaces directly; leave Root Directory empty. Build command for the web service is `npm ci && npm run build`; start is `npm run start`; health path is `/api/health`.
+3. The repository root contains the workspaces directly; leave Root Directory empty. Build command for the web service is `npm ci --include=dev && npm run build`; start is `npm run start`; health path is `/api/health`.
 4. The blueprint sets `SERVE_FRONTEND=true`. The web service serves both the frontend and API, keeping session/CSRF cookies on the same origin.
 5. Key Value uses `noeviction` and internal connections. The blueprint injects its URL into API, Studio, image and video services. If using your already-created Key Value instead, replace the blueprint references with that service's internal URL and avoid creating a duplicate instance.
 6. Use a paid web service for existing SMTP: Render Free blocks outbound ports 25, 465 and 587. Background workers also require appropriate paid plans. See [Render Free limits](https://render.com/docs/free).
