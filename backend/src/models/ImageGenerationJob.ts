@@ -13,6 +13,7 @@ const imageGenerationJobSchema = new Schema({
   numberOfImages: { type: Number, default: 1 },
   characterReferenceIds: [String],
   status: { type: String, enum: ["quoted", "queued", "processing", "completed", "failed", "retrying"], default: "quoted", index: true },
+  dispatchMode: { type: String, enum: ["redis", "mongo"], default: "redis", index: true },
   approvedCredits: Number,
   outputMetadata: { type: Schema.Types.Mixed, default: {} },
   providerUsage: { type: Schema.Types.Mixed, default: {} },

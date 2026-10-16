@@ -21,6 +21,7 @@ const videoGenerationJobSchema = new Schema({
   providerJobId: String,
   progress: { type: Number, default: 0 },
   status: { type: String, enum: ["quoted", "queued", "processing", "completed", "failed", "retrying"], default: "quoted", index: true },
+  dispatchMode: { type: String, enum: ["redis", "mongo"], default: "redis", index: true },
   approvedCredits: Number,
   outputMetadata: { type: Schema.Types.Mixed, default: {} },
   providerUsage: { type: Schema.Types.Mixed, default: {} },

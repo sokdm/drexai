@@ -15,7 +15,7 @@ export async function priceStudioSteps(steps: StudioStep[]) {
       const quantity = step.kind === "audio" ? step.input.text.length : step.kind === "video" ? step.input.durationSeconds : 1;
       const quote = await createQuote({ feature, provider, model: step.input.model, quantity, unit, settings: step.input });
       if (!quote.allowed) { missing.add(`${step.input.model}: ${(quote as any).reason}`); step.credits = 0; continue; }
-      step.credits = quote.credits; step.pricing = { ...quote, providerCostUsd: quote.estimatedCostUsd, costIsEstimate: true }; step.input.requestLimits = (quote as any).requestLimits; continue;
+      step.input.model = quote.model; step.credits = quote.credits; step.pricing = { ...quote, providerCostUsd: quote.estimatedCostUsd, costIsEstimate: true }; step.input.requestLimits = (quote as any).requestLimits; continue;
     }
     const rule = await GenerationPriceRule.findOne({ feature, provider, model: step.input.model, unit, active: true });
     if (!rule || rule.unit !== unit || !(rule.creditsPerUnit > 0) || !(rule.providerCostUsd > 0)) {

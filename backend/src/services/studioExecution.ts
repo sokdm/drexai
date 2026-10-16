@@ -132,7 +132,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           } else {
             if (!step.providerJobId) { step.providerJobId = await providers.createVideo(input); await checkpoint(); }
             const operation = await providers.pollVideo(step.providerJobId);
-            const videos = await providers.downloadVideo(operation, { userId: String(production.userId) });
+            const videos = await providers.downloadVideo(operation, { userId: String(production.userId), model: step.input.model });
             const native = videos[0].metadata;
             if (step.input.nativeAudio && (!native?.nativeAudio || Math.abs(Number(native.durationSeconds) - step.input.durationSeconds) > 0.5)) throw Object.assign(new Error("Generated native audiovisual clip is incomplete or has an unexpected duration. Review and regenerate with a new quote."), { mediaRejected: true });
             output = { ...videos[0], durationSeconds: native?.durationSeconds ?? step.input.durationSeconds, providerUsage: { ...((operation.response as any)?.usageMetadata ?? {}), ...native } };

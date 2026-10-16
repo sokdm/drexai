@@ -72,7 +72,7 @@ export function ImageToVideoPage() {
     try { await api(`/api/videos/assets/${asset._id}`, { method: "DELETE" }); await load(); } catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
   }
   return <div className="generation-workspace">
-    <header className="generation-heading"><div className="flex items-center gap-2"><Film size={18} className="text-teal-600" /><h1>Image to Video</h1></div><span>Veo</span></header>
+    <header className="generation-heading"><div className="flex items-center gap-2"><Film size={18} className="text-teal-600" /><h1>Image to Video</h1></div><span>{form.model.startsWith("openrouter/") ? "OpenRouter" : "Veo"}</span></header>
     <div className="generation-layout">
       <form onSubmit={submit} className="generation-controls" aria-label="Video settings">
         <header className="control-heading"><h2>Create a video</h2><p>Upload an image, describe motion, then review the cost.</p></header>
@@ -103,7 +103,7 @@ export function ImageToVideoPage() {
             </div>
           </div>
         </fieldset>
-        <div className="generation-submit"><div className="flex justify-between text-xs"><span className="text-slate-500">Credit estimate</span><strong>{quote ? `${quote.credits} credits` : "Not calculated"}</strong></div><Button className="mt-3 w-full" disabled={busy || uploading || !selectedImage || form.motionPrompt.trim().length < 3}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Film size={16} />}{busy ? "Please wait..." : quote ? `Generate / ${quote.credits} credits` : "Preview cost"}</Button></div>
+        <div className="generation-submit">{quote?.model && <p className="mb-2 text-xs text-slate-500">Model for this quote: {quote.model.replace("openrouter/", "")}</p>}<div className="flex justify-between text-xs"><span className="text-slate-500">Credit estimate</span><strong>{quote ? `${quote.credits} credits` : "Not calculated"}</strong></div><Button className="mt-3 w-full" disabled={busy || uploading || !selectedImage || form.motionPrompt.trim().length < 3}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Film size={16} />}{busy ? "Please wait..." : quote ? `Generate / ${quote.credits} credits` : "Preview cost"}</Button></div>
       </form>
       <GenerationResults kind="video" assets={assets} jobs={jobs} busy={busy} onRefresh={() => load().catch(err => setError(err.message))} onRegenerate={reuse} onDelete={remove} />
     </div>

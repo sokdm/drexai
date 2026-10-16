@@ -9,8 +9,12 @@ const directImageModels = [
   { id: "gemini-3-pro-image", label: "Nano Banana Pro", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 10, characterReference: true }
 ];
 
+const alternativeImageModels = [
+ { id: "openrouter/black-forest-labs/flux-3-image-klein", label: "FLUX 3 Klein", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K", "4K"], maxImages: 10, characterReference: true },
+ { id: "openrouter/bytedance-seed/seedream-5-0-flash", label: "Seedream 5 Flash", aspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4"], resolutions: ["1K", "2K"], maxImages: 10, characterReference: true }
+];
 const routerImageModels = directImageModels.map(m => ({ ...m, id: "openrouter/google/" + m.id, label: m.label + " via OpenRouter" }));
-export const imageModels = env.OPENROUTER_API_KEY ? [...routerImageModels, ...directImageModels] : [...directImageModels, ...routerImageModels];
+export const imageModels = env.OPENROUTER_API_KEY ? [...alternativeImageModels, ...routerImageModels, ...directImageModels] : [...directImageModels, ...alternativeImageModels, ...routerImageModels];
 
 export const stylePresets = ["Cinematic", "Anime", "Photoreal", "3D animation", "Documentary", "Editorial", "Concept art"];
 

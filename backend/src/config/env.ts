@@ -7,6 +7,7 @@ dotenv.config({ path: "../.env", override: false });
 const envSchema = z.object({
   OPENROUTER_MANAGEMENT_KEY: z.preprocess(v => v === "" ? undefined : v, z.string().min(1).optional()),
   OPENROUTER_API_KEY: z.preprocess(v => v === "" ? undefined : v, z.string().min(1).optional()),
+  OPENROUTER_TEXT_FALLBACK_MODEL: z.string().default("openai/gpt-4.1-mini"),
   OPENROUTER_TEXT_MODEL: z.string().default("google/gemini-3.8-flash"),
   ADMIN_BOOTSTRAP_EMAIL: z.string().email().transform(v => v.toLowerCase()).optional(),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(14).max(200).optional(),

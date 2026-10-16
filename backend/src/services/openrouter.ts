@@ -42,7 +42,10 @@ export async function routerResponse(endpoint: string, body?: any, timeout = 180
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     if (body && mongoose.connection.readyState === 1) await GatewayUsage.create({ model: "openrouter/" + body.model, kind: endpoint === "chat/completions" ? "text" : endpoint === "images" ? "image" : endpoint === "audio/speech" ? "voice" : "video", status: "failed", usage: { httpStatus: response.status, costUnknown: true } });
-    throw Object.assign(new Error(`OpenRouter request failed (${response.status}): ${String(data.error?.message || "Review provider access, balance and model availability").slice(0, 500)}`), { providerRejected: response.status < 500 });
+    const detail = String(data.error?.message || "Review provider access, balance and model availability");
+    const privacy = /training violation|guardrail restrictions|data policy/i.test(detail);
+    const definiteTextFailure = endpoint === "chat/completions" && response.status === 503 && !!data.error && !data.id && !data.generation_id;
+    throw Object.assign(new Error(privacy ? "Your OpenRouter account privacy policy blocks this model's available provider. Choose another model in Admin / Providers, or review https://openrouter.ai/settings/privacy. Your privacy settings were not changed." : `OpenRouter request failed (${response.status}): ${detail.slice(0, 500)}`), { providerRejected: response.status < 500 || definiteTextFailure, status: response.status, privacyBlocked: privacy });
   }
   return response;
 }
@@ -52,11 +55,26 @@ export async function recordRouterUsage(id: string, kind: string, data: any, use
   const requestId = data.id || data.generation_id, values = { model: id, kind, userId, ...(requestId ? { requestId } : {}), usage: data.usage || {}, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-export async function routerText(input: { model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number } }) {
+type TextInput = { model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
+export async function routerText(input: TextInput) {
+ const { withProvider, assertProviderBudget } = await import("./platformControl.js");
+ const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(!input.media?.length ? input.requestLimits?.fallbacks || [] : [])];
+ for (let index = 0; index < candidates.length; index++) {
+  const candidate = candidates[index];
+  try {
+   if (index) await assertProviderBudget(candidate.model, (input.requestLimits as any)?.approvedCostUsd);
+   return await withProvider(candidate.model, () => routerTextAttempt({ ...input, model: candidate.model, requestLimits: input.requestLimits ? { ...input.requestLimits, maxPrice: candidate.maxPrice } : undefined }));
+  } catch (error: any) {
+   if (index === candidates.length - 1 || !error.providerRejected || ![404, 429, 503].includes(error.status)) throw error;
+  }
+ }
+ throw new Error("No approved text model is available");
+}
+async function routerTextAttempt(input: TextInput) {
   const record = await verifiedRouterModel(input.model, "text"), supported = record.supported_parameters || [];
   if (!supported.includes("max_tokens")) throw new Error("Choose an OpenRouter model with a supported output token limit");
   if (input.schema && !supported.includes("response_format")) throw new Error("Choose an OpenRouter text model with structured output support");
-  const body: any = { model: routerId(input.model), messages: [{ role: "system", content: input.system }, { role: "user", content: input.media?.length ? [{ type: "text", text: input.prompt }, ...input.media] : input.prompt }], provider: { require_parameters: true, allow_fallbacks: false } };
+  const body: any = { model: routerId(input.model), messages: [{ role: "system", content: input.system }, { role: "user", content: input.media?.length ? [{ type: "text", text: input.prompt }, ...input.media] : input.prompt }], provider: { require_parameters: true, allow_fallbacks: !!input.requestLimits?.maxPrice, ...(input.requestLimits?.maxPrice ? { max_price: input.requestLimits.maxPrice } : {}) } };
   const limits = input.requestLimits || { maxInputTokens: 20000, maxOutputTokens: 12000 };
   const inputBytes = Buffer.byteLength(input.system + input.prompt, "utf8");
   if (inputBytes > limits.maxInputTokens) throw new Error("Input exceeds this quote's conservative text token limit. Shorten the context or obtain a new verified quote.");

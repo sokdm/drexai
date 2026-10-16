@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,9 @@ const { errorHandler } = await import("../dist/middleware/errorHandler.js");
 const { VideoGenerationJob } = await import("../dist/models/VideoGenerationJob.js");
 const { processVideoJob } = await import("../dist/workers/processVideoJob.js");
 const { env } = await import("../dist/config/env.js");
+const { runMedia } = await import("../dist/services/ffmpeg.js");
 env.GEMINI_API_KEY = "test-only";
+let videoBytes;
 let db, server, base, headers, image;
 before(async () => {
   db = await MongoMemoryReplSet.create({ binary: { downloadDir: fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server", import.meta.url)) }, replSet: { count: 1 } });
@@ -30,6 +32,8 @@ before(async () => {
   const user = await User.create({ displayName: "Upload test", email: "upload@example.test", passwordHash: "test-only", status: "active" });
   await Session.create({ userId: user._id, tokenHash: hashSecret("upload-test"), csrfTokenHash: hashSecret("csrf"), expiresAt: new Date(Date.now() + 60000) });
   headers = { Cookie: "drex_session=upload-test", "x-csrf-token": "csrf", "Content-Type": "image/png", "x-file-name": "test.png" };
+  await runMedia("ffmpeg", ["-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=24:d=8", "-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path.join(directory, "fixture.mp4")]);
+  videoBytes = (await readFile(path.join(directory, "fixture.mp4"))).toString("base64");
   image = await sharp({ create: { width: 80, height: 60, channels: 3, background: "#14b8a6" } }).png().toBuffer();
   const app = express(); app.use(express.json(), cookieParser()); app.use("/api/videos", videosRouter); app.use(errorHandler);
   server = await new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
@@ -71,12 +75,12 @@ test("uploads to private storage, previews only for owner, and resolves actual p
   try {
     globalThis.fetch = async (url, options) => {
       if (String(url).includes(":predictLongRunning")) { sent = JSON.parse(options.body); return Response.json({ name: "operations/upload-test" }); }
-      if (String(url).includes("/operations/upload-test")) return Response.json({ done: true, response: { generatedVideos: [{ video: { videoBytes: Buffer.from("mock clip").toString("base64") } }] } });
+      if (String(url).includes("/operations/upload-test")) return Response.json({ done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { encodedVideo: videoBytes, encoding: "video/mp4" } }] } } });
       throw new Error("Unexpected provider call in test");
     };
     await processVideoJob(String(job._id));
   } finally { globalThis.fetch = originalFetch; }
-  assert.equal(sent.instances[0].image.inlineData.data, bytes.buffer.toString("base64"));
-  assert.equal(sent.instances[0].image.inlineData.mimeType, "image/png");
+  assert.equal(sent.instances[0].image.bytesBase64Encoded, bytes.buffer.toString("base64"));
+  assert.equal(sent.instances[0].image.mimeType, "image/png");
   assert.equal((await VideoGenerationJob.findById(job._id)).status, "completed");
 });

@@ -1,3 +1,4 @@
+import { dispatchGeneration } from "../services/generationDispatch.js";
 import { providerFor } from "../services/openrouter.js";
 import { configuredModels } from "../services/platformControl.js";
 import { managedPrice, rememberQuote, approvedTerms } from "../services/managedPricing.js";
@@ -54,16 +55,11 @@ imagesRouter.post("/generate", async (req, res, next) => {
     const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("text_to_image", providerFor(settings.model), settings, imageCreditCost(settings)));
     const credits = terms.credits;
     if (settings.approvedCredits !== credits) return res.status(400).json({ error: `Approve ${credits} credits before generating.` });
-    await assertImageQueueReady();
+
     reservation = await reserveCredits(String(req.user._id), terms, `image:${req.user._id}:${Date.now()}:${settings.prompt.slice(0, 24)}`);
-    job = await ImageGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(settings.model), status: "queued", approvedCredits: credits });
+    job = await ImageGenerationJob.create({ ...settings, model: terms.model || settings.model, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(terms.model || settings.model), status: "queued", approvedCredits: credits });
     emitImageJob(String(job._id), { status: job.status, job });
-    const queued = await enqueueImageJob(String(job._id));
-    if (!queued) {
-      processImageJob(String(job._id))
-        .then(() => ImageGenerationJob.findById(job._id).then((fresh) => emitImageJob(String(job._id), { status: fresh?.status, job: fresh })))
-        .catch(() => null);
-    }
+    await dispatchGeneration("image", String(job._id));
     res.status(202).json({ job });
   } catch (error) {
     const failed = job ? await ImageGenerationJob.findOneAndUpdate({ _id: job._id, status: "queued" }, { status: "failed", error: "Queue submission failed. Reserved credits released." }) : null;

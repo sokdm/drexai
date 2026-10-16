@@ -20,8 +20,9 @@ import { GenerationPriceRule } from "../dist/models/GenerationPriceRule.js";
 import { ProviderControl } from "../dist/models/Admin.js";
 import { runMedia } from "../dist/services/ffmpeg.js";
 const original = globalThis.fetch, originalKey = env.OPENROUTER_API_KEY;
-let db, dir, mp3, video, png, fail = false, requests = [], pricingAvailable = false;
+let db, dir, mp3, video, png, fail = false, requests = [], pricingAvailable = false, blockGoogle = false;
 const models = [
+ { id: "openai/gpt-4.1-mini", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], pricing: { prompt: "0.0000004", completion: "0.0000016" } },
  { id: "google/gemini-3.8-flash", architecture: { input_modalities: ["text", "image", "video"], output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], pricing: { prompt: "0.000001", completion: "0.000002" } },
  { id: "google/gemini-3.8-flash-tts", architecture: { output_modalities: ["speech"] }, pricing: { prompt: "0.00001" } }
 ];
@@ -36,12 +37,17 @@ before(async () => {
  globalThis.fetch = async (url, options = {}) => {
   const u = new URL(url); assert.equal(u.origin, "https://openrouter.ai");
   if (u.pathname === "/api/v1/models") return Response.json({ data: models });
-  if (u.pathname === "/api/v1/images/models") return Response.json({ data: [image] });
+  if (u.pathname === "/api/v1/images/models") return Response.json({ data: [image, { ...image, id: "google/gemini-3-pro-image" }, { ...image, id: "black-forest-labs/flux-3-image-klein" }] });
   if (u.pathname === "/api/v1/videos/models") return Response.json({ data: [{ id: "google/veo-3.1", supported_durations: [4, 6, 8], supported_resolutions: ["720p", "1080p"], supported_aspect_ratios: ["16:9", "9:16"] }] });
-  if (u.pathname.endsWith("/endpoints")) return pricingAvailable ? Response.json({ endpoints: [{ provider_name: "Test", pricing: [{ billable: "output_image", unit: "image", cost_usd: "0.04" }] }] }) : Response.json({}, { status: 503 });
+  if (u.pathname.endsWith("/endpoints")) {
+   if (u.pathname.includes("gemini-3-pro-image")) return Response.json({ endpoints: [{ provider_name: "Google", pricing: [{ billable: "output_image", unit: "token", cost_usd: ".00003" }] }] });
+   if (u.pathname.includes("flux-3-image-klein")) return Response.json({ endpoints: [{ provider_name: "BFL", pricing: [{ billable: "output_image", unit: "image", cost_usd: ".009", variant: "1k" }] }] });
+   return pricingAvailable ? Response.json({ endpoints: [{ provider_name: "Test", pricing: [{ billable: "output_image", unit: "image", cost_usd: "0.04" }] }] }) : Response.json({}, { status: 503 });
+  }
   assert.equal(options.headers.Authorization, "Bearer test-router-key");
   const body = options.body ? JSON.parse(options.body) : undefined; requests.push({ path: u.pathname, body });
   if (fail) return Response.json({ error: { message: "Quota test failure" } }, { status: 429 });
+  if (blockGoogle && body?.model?.startsWith("google/") && u.pathname.endsWith("chat/completions")) return Response.json({ error: { message: "Paid model training violation (account settings)" } }, { status: 404 });
   if (u.pathname.endsWith("chat/completions")) return Response.json({ id: "text-1", choices: [{ message: { content: '{"title":"Valid script"}' }, finish_reason: "stop" }], usage: { cost: 0.001, prompt_tokens: 10, completion_tokens: 5 } });
   if (u.pathname === "/api/v1/images") return Response.json({ data: [{ b64_json: png.toString("base64"), media_type: "image/png" }], usage: { cost: 0.04 } });
   if (u.pathname.endsWith("audio/speech")) return new Response(mp3, { headers: { "content-type": "audio/mpeg" } });
@@ -57,6 +63,14 @@ test("text and structured scripts use OpenRouter, validated output and reported 
  assert.equal(result.title, "Valid script"); const request = requests.at(-1).body;
  assert.equal(request.response_format.type, "json_schema"); assert.equal(request.generation_config, undefined); assert.equal(request.provider.allow_fallbacks, false);
  assert.equal((await GatewayUsage.findOne({ kind: "text" })).costUsd, 0.001);
+});
+test("approved non-Google text fallback handles privacy rejection without relaxing privacy", async () => {
+ blockGoogle = true;
+ try {
+  const value = await routerText({ model: "openrouter/google/gemini-3.8-flash", system: "s", prompt: "p", requestLimits: { maxInputTokens: 20000, maxOutputTokens: 12000, maxPrice: { prompt: 1, completion: 2 }, fallbacks: [{ model: "openrouter/openai/gpt-4.1-mini", maxPrice: { prompt: .4, completion: 1.6 } }] } });
+  assert.match(value, /Valid script/); assert.equal(requests.at(-1).body.model, "openai/gpt-4.1-mini"); assert.equal(requests.at(-1).body.provider.data_collection, undefined); assert.equal(requests.at(-1).body.provider.max_price.completion, 1.6);
+  await assert.rejects(() => routerText({ model: "openrouter/google/gemini-3.8-flash", system: "s", prompt: "p" }), /privacy policy blocks/);
+ } finally { blockGoogle = false; }
 });
 test("images and character references are normalized to stored-compatible PNG bytes", async () => {
  const result = await generateGeminiImages({ model: "openrouter/google/gemini-nano-banana-2.1", prompt: "Scene", numberOfImages: 2, resolution: "1K", aspectRatio: "16:9", referenceImages: [{ contentType: "image/png", data: png.toString("base64") }] });
@@ -92,6 +106,10 @@ test("credit rule and approved quote remain stable when defaults and prices chan
  await rememberQuote(userId, settings, quote); await PricingPolicy.create({ _id: "global", revision: 2, values: { ...defaultPricingPolicy, markup: 12 } });
  assert.equal((await approvedTerms(userId, settings, 40, () => managedPrice("text_to_image", "openrouter", settings, 2))).credits, 40);
  await GatewayBinding.create({ _id: "story_generation", model: "openrouter/google/gemini-3.8-flash" }); assert.equal(await defaultModel("story_generation", "legacy"), "openrouter/google/gemini-3.8-flash");
+});
+test("unbounded Google image pricing proposes a verified compatible FLUX quote before approval", async () => {
+ const quote = await managedPrice("text_to_image", "openrouter", { model: "openrouter/google/gemini-3-pro-image", resolution: "1K", aspectRatio: "16:9", numberOfImages: 1 }, 2);
+ assert.equal(quote.model, "openrouter/black-forest-labs/flux-3-image-klein"); assert.equal(quote.requestedModel, "openrouter/google/gemini-3-pro-image"); assert.equal(quote.estimatedCostUsd, .009); assert.ok(quote.credits >= 5);
 });
 test("provider limits remain enforced and explicit failures are not blindly replayed", async () => {
  const model = "openrouter/google/gemini-3.8-flash"; await ProviderControl.create({ provider: "openrouter", model, enabled: false });

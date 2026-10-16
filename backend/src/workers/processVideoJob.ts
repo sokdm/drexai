@@ -1,3 +1,4 @@
+import { CreditReservation } from "../models/CreditReservation.js";
 import { MediaAsset } from "../models/MediaAsset.js";
 import { VideoGenerationJob } from "../models/VideoGenerationJob.js";
 import { createVeoOperation, downloadVeoVideos, pollVeoOperation } from "../services/videoGeneration.js";
@@ -8,6 +9,7 @@ import { readSourceImage } from "../services/sourceImages.js";
 export async function processVideoJob(jobId: string) {
   const job = await VideoGenerationJob.findOneAndUpdate({ _id: jobId, status: { $in: ["queued", "retrying"] } }, { $set: { status: "processing" }, $inc: { attempts: 1 } }, { new: true });
   if (!job) return;
+  if (job.reservationId && !await CreditReservation.exists({ _id: job.reservationId, userId: job.userId, status: "reserved" })) { job.status = "failed"; job.error = "The credit reservation is no longer active. Request a new quote before generating."; await job.save(); return; }
   try {
     job.status = "processing";
     job.progress = 10;
@@ -22,7 +24,7 @@ export async function processVideoJob(jobId: string) {
     const operation = await pollVeoOperation(operationName);
     job.progress = 80;
     await job.save();
-    const outputs = await downloadVeoVideos(operation, { userId: String(job.userId) });
+    const outputs = await downloadVeoVideos(operation, { userId: String(job.userId), model: job.model });
     const assets = [];
     for (let index = 0; index < outputs.length; index += 1) {
       const output = outputs[index];

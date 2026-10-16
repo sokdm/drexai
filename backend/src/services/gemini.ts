@@ -67,7 +67,7 @@ export async function geminiJson<T>(input: {
 }) {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
-  const raw = await withProvider(selectedModel, () => isOpenRouter(selectedModel) ? routerText({ ...input, model: selectedModel }) : withRetry(async () => {
+  const raw = isOpenRouter(selectedModel) ? await routerText({ ...input, model: selectedModel }) : await withProvider(selectedModel, () => withRetry(async () => {
     const response = await geminiFetch(GEMINI_URL, {
       method: "POST",
       signal: AbortSignal.timeout(90000),
@@ -93,7 +93,8 @@ export async function geminiJson<T>(input: {
 export async function geminiText(input: { system: string; prompt: string; maxOutputTokens?: number; model?: string; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number } }) {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
-  return withProvider(selectedModel, () => isOpenRouter(selectedModel) ? routerText({ ...input, model: selectedModel }) : withRetry(async () => {
+  if (isOpenRouter(selectedModel)) return routerText({ ...input, model: selectedModel });
+  return withProvider(selectedModel, () => withRetry(async () => {
     const response = await geminiFetch(GEMINI_URL, {
       method: "POST",
       signal: AbortSignal.timeout(90000),

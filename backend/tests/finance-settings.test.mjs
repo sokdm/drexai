@@ -21,6 +21,9 @@ import { adminRouter } from "../dist/routes/admin.js";
 import { errorHandler } from "../dist/middleware/errorHandler.js";
 import { hashSecret } from "../dist/utils/crypto.js";
 import { env } from "../dist/config/env.js";
+import { dispatchGeneration, runMongoGenerationTick } from "../dist/services/generationDispatch.js";
+import { ImageGenerationJob } from "../dist/models/ImageGenerationJob.js";
+import { VideoGenerationJob } from "../dist/models/VideoGenerationJob.js";
 let db, server, base, user, other, adminHeaders;
 const realFetch = globalThis.fetch;
 before(async () => {
@@ -112,4 +115,17 @@ test("daily admission is atomic, idempotent and failed admission rolls back wall
  await assert.rejects(() => reserveCredits(String(user._id), quote, "daily-two"), /Daily generation/); assert.equal((await Wallet.findOne({ userId: user._id })).availableCredits, 90);
  assert.equal((await DailySpendBudget.findById("global:" + new Date().toISOString().slice(0, 10))).admittedUsd, .06);
  await releaseReservation(reservation.id); assert.equal((await Wallet.findOne({ userId: user._id })).availableCredits, 100);
+});
+test("Redis failure persists image and video work for bounded Mongo fallback", async () => {
+ const image = await ImageGenerationJob.create({ userId: user._id, prompt: "Original scene", model: "test", status: "queued" });
+ const video = await VideoGenerationJob.create({ userId: user._id, motionPrompt: "Camera movement", model: "test", status: "queued" });
+ const offline = { ready: async () => { throw new Error("Redis offline"); }, enqueue: async () => { throw new Error("Must not enqueue"); } };
+ assert.equal(await dispatchGeneration("image", image.id, offline), "mongo"); assert.equal(await dispatchGeneration("video", video.id, offline), "mongo");
+ let executions = 0;
+ const processor = Model => async id => { const claimed = await Model.findOneAndUpdate({ _id: id, status: "queued" }, { status: "processing" }); if (!claimed) return; executions++; await Model.updateOne({ _id: id }, { status: "completed" }); };
+ const processors = { image: processor(ImageGenerationJob), video: processor(VideoGenerationJob) };
+ await Promise.all([runMongoGenerationTick(processors), runMongoGenerationTick(processors)]); await runMongoGenerationTick(processors);
+ assert.equal(executions, 2); assert.equal((await ImageGenerationJob.findById(image._id)).status, "completed"); assert.equal((await VideoGenerationJob.findById(video._id)).status, "completed");
+ const delivered = await ImageGenerationJob.create({ userId: user._id, prompt: "Next image", model: "test", status: "queued" });
+ assert.equal(await dispatchGeneration("image", delivered.id, { ready: async () => {}, enqueue: async () => { throw new Error("Disconnected after readiness"); } }), "mongo");
 });

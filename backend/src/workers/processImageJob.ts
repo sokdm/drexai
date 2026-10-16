@@ -1,3 +1,4 @@
+import { CreditReservation } from "../models/CreditReservation.js";
 import { ImageGenerationJob } from "../models/ImageGenerationJob.js";
 import { MediaAsset } from "../models/MediaAsset.js";
 import { generateGeminiImages } from "../services/imageGeneration.js";
@@ -7,6 +8,7 @@ import { releaseReservation, settleReservation } from "../services/wallet.js";
 export async function processImageJob(jobId: string) {
   const job = await ImageGenerationJob.findOneAndUpdate({ _id: jobId, status: { $in: ["queued", "retrying"] } }, { $set: { status: "processing" }, $inc: { attempts: 1 } }, { new: true });
   if (!job) return;
+  if (job.reservationId && !await CreditReservation.exists({ _id: job.reservationId, userId: job.userId, status: "reserved" })) { job.status = "failed"; job.error = "The credit reservation is no longer active. Request a new quote before generating."; await job.save(); return; }
   try {
     job.status = "processing";
     await job.save();

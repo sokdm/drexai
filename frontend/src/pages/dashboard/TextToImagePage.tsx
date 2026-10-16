@@ -60,7 +60,7 @@ export function TextToImagePage() {
             {selectedModel?.characterReference && <Select label="Character" value={form.characterReferenceIds[0] ?? ""} options={["", ...config.characters.map((c: any) => c._id)]} labels={{ "": "None", ...Object.fromEntries(config.characters.map((c: any) => [c._id, c.name])) }} onChange={value => update("characterReferenceIds", value ? [value] : [])} />}</div>
           </div>
         </fieldset>
-        <div className="generation-submit"><div className="flex justify-between text-xs"><span className="text-slate-500">Credit estimate</span><strong>{quote ? `${quote.credits} credits` : "Not calculated"}</strong></div><Button className="mt-3 w-full" disabled={busy || form.prompt.trim().length < 3}>{busy ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}{busy ? "Please wait..." : quote ? `Generate / ${quote.credits} credits` : "Preview cost"}</Button></div>
+        <div className="generation-submit">{quote?.model && <p className="mb-2 text-xs text-slate-500">Model for this quote: {quote.model.replace("openrouter/", "")}</p>}<div className="flex justify-between text-xs"><span className="text-slate-500">Credit estimate</span><strong>{quote ? `${quote.credits} credits` : "Not calculated"}</strong></div><Button className="mt-3 w-full" disabled={busy || form.prompt.trim().length < 3}>{busy ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}{busy ? "Please wait..." : quote ? `Generate / ${quote.credits} credits` : "Preview cost"}</Button></div>
       </form>
       <GenerationResults kind="image" assets={assets} jobs={jobs} busy={busy} onRefresh={() => load().catch(err => setError(err.message))} onRegenerate={reuse} onDelete={remove} />
     </div>

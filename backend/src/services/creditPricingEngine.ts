@@ -3,7 +3,8 @@ import { z } from "zod";
 import { PricingPolicy, PricingOverride } from "../models/Finance.js";
 import { CreditPackage } from "../models/CreditPackage.js";
 import { routerPricing } from "./openrouterAdmin.js";
-import { verifiedRouterModel } from "./openrouter.js";
+import { verifiedRouterModel, checkCapability } from "./openrouter.js";
+import { env } from "../config/env.js";
 
 const pct = z.number().min(0).max(95), usd = z.number().min(0).max(10000);
 export const pricingPolicySchema = z.object({
@@ -55,7 +56,7 @@ export async function estimateRouterCost(input: any, policy: any) {
     if (unknown.length || rates.prompt === undefined || rates.completion === undefined) throw new Error("This model's variable charges require a verified pricing override");
     const inputRate = Decimal.max(rates.prompt, rates.input_cache_read || 0).plus(rates.input_cache_write || 0);
     const outputRate = Decimal.max(rates.completion, rates.internal_reasoning || 0);
-    return { cost: inputRate.mul(limits.maxInputTokens).plus(outputRate.mul(limits.maxOutputTokens)).plus(rates.request || 0).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits };
+    return { cost: inputRate.mul(limits.maxInputTokens).plus(outputRate.mul(limits.maxOutputTokens)).plus(rates.request || 0).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits: { ...limits, maxPrice: { prompt: inputRate.mul(1000000).toNumber(), completion: outputRate.mul(1000000).toNumber(), request: Number(rates.request || 0) } } };
   }
   if (kind === "image") {
     const costs: Decimal[] = [];
@@ -72,7 +73,7 @@ export async function estimateRouterCost(input: any, policy: any) {
   // Video SKUs vary by provider. Never use the zero token prices from the general models endpoint.
   if (kind === "video") {
     const quality = String(settings.quality || String(input.unit).split(":")[1] || "720p").toLowerCase(), rates = published.pricing;
-    const key = quality === "4k" ? "duration_seconds_with_audio_4k" : "duration_seconds_with_audio";
+    const key = input.model === "openrouter/alibaba/wan-3.0" ? `duration_seconds_${quality}` : quality === "4k" ? "duration_seconds_with_audio_4k" : "duration_seconds_with_audio";
     if (rates[key] === undefined) throw new Error("Verify the selected resolution and native-audio video pricing before use");
     return { cost: new Decimal(rates[key]).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits };
   }
@@ -80,9 +81,32 @@ export async function estimateRouterCost(input: any, policy: any) {
 }
 export async function quoteAutomaticCredits(input: any) {
   const policy = await getPricingPolicy(), values = { ...policy.values, ...(policy.values.featurePolicies[input.feature] || {}) };
-  const estimate = await estimateRouterCost(input, values);
+  let estimate;
+  try { estimate = await estimateRouterCost(input, values); }
+  catch (error: any) {
+    if (input.feature !== "text_to_image" || !input.model.startsWith("openrouter/google/") || !/token\/megapixel/.test(error.message)) throw error;
+    const model = "openrouter/black-forest-labs/flux-3-image-klein", record = await verifiedRouterModel(model, "image");
+    checkCapability(record, "resolution", input.settings?.resolution || input.unit.split(":")[1]); checkCapability(record, "aspect_ratio", input.settings?.aspectRatio || "16:9");
+    if (input.settings?.characterReferenceIds?.length) checkCapability(record, "input_references", input.settings.characterReferenceIds.length);
+    input = { ...input, requestedModel: input.model, model };
+    estimate = await estimateRouterCost(input, values);
+  }
+  const requestLimits: any = { ...estimate.limits }, candidates: any[] = [];
+  if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis"].includes(input.feature)) {
+    const model = "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
+    if (model !== input.model) try {
+      const record = await verifiedRouterModel(model, "text");
+      if (record.supported_parameters?.includes("max_tokens") && record.supported_parameters.includes("response_format")) {
+        const alternative = await estimateRouterCost({ ...input, model }, values);
+        await (await import("./platformControl.js")).assertProviderBudget(model, alternative.cost.toNumber());
+        candidates.push({ model, maxPrice: (alternative.limits as any).maxPrice }); estimate.cost = estimate.cost.plus(alternative.cost);
+      }
+    } catch { /* Unverified or disabled fallbacks are never included in approved terms. */ }
+  }
+  if (candidates.length) requestLimits.fallbacks = candidates;
+  requestLimits.approvedCostUsd = estimate.cost.toNumber();
   if (estimate.cost.gt(values.maxJobUsd)) throw new Error("Estimated provider cost exceeds the maximum per-job spending limit");
   const packages = await CreditPackage.find({ active: true, currency: "USD" }).lean();
   const calculation = calculateCreditPrice(estimate.cost.toString(), packages, values, Number(input.quantity || 1), input.feature === "text_to_image");
-  return { allowed: true, ...calculation, feature: input.feature, provider: "openrouter", model: input.model, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: estimate.cost.toNumber(), pricingVersion: policy.revision, pricingSource: estimate.source, pricingVerifiedAt: estimate.verifiedAt, requestLimits: estimate.limits, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
+  return { allowed: true, ...calculation, feature: input.feature, provider: "openrouter", model: input.model, requestedModel: input.requestedModel, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: estimate.cost.toNumber(), pricingVersion: policy.revision, pricingSource: estimate.source, pricingVerifiedAt: estimate.verifiedAt, requestLimits, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
 }

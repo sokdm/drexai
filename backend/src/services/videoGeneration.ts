@@ -11,8 +11,9 @@ const directVideoModels = [
   { id: "veo-3.1-generate-preview", label: "Veo 3.1", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4], qualities: ["720p", "1080p", "4K"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }
 ];
 
+const alternativeVideoModels = [{ id: "openrouter/alibaba/wan-3.0", label: "Wan 3.0 with audio", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4], qualities: ["720p", "1080p"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }];
 const routerVideoModels = directVideoModels.map(m => ({ ...m, id: "openrouter/google/veo-3.1", label: "Veo 3.1 via OpenRouter", qualities: ["720p", "1080p"] }));
-export const videoModels = env.OPENROUTER_API_KEY ? [...routerVideoModels, ...directVideoModels] : [...directVideoModels, ...routerVideoModels];
+export const videoModels = env.OPENROUTER_API_KEY ? [...alternativeVideoModels, ...routerVideoModels, ...directVideoModels] : [...directVideoModels, ...alternativeVideoModels, ...routerVideoModels];
 
 export function validateVideoSettings(input: any) {
   const model = videoModels.find((item) => item.id === input.model);
@@ -20,7 +21,7 @@ export function validateVideoSettings(input: any) {
   if (!model.aspectRatios.includes(input.aspectRatio)) throw new Error("Unsupported aspect ratio for selected Veo model");
   if (!model.durations.includes(Number(input.durationSeconds))) throw new Error("Unsupported duration for selected Veo model");
   if (!model.qualities.includes(input.quality)) throw new Error("Unsupported output quality for selected Veo model");
-  if (input.quality !== "720p" && Number(input.durationSeconds) !== 8) throw new Error("1080p and 4K Veo output require an eight-second clip");
+  if (!model.id.includes("alibaba/wan-") && input.quality !== "720p" && Number(input.durationSeconds) !== 8) throw new Error("1080p and 4K Veo output require an eight-second clip");
   const quantity = Number(input.quantity ?? 1);
   if (quantity < 1 || quantity > model.maxQuantity) throw new Error(`Selected model supports 1-${model.maxQuantity} outputs`);
   if (!String(input.motionPrompt ?? "").trim()) throw new Error("Motion prompt is required");
@@ -77,8 +78,8 @@ export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 6
   throw new Error("Veo generation timed out; existing operation can be resumed without submitting another generation");
 }
 
-export async function downloadVeoVideos(operation: any, context?: { userId?: string }) {
-  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId);
+export async function downloadVeoVideos(operation: any, context?: { userId?: string; model?: string }) {
+  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId, context?.model);
   const samples = operation.response?.generateVideoResponse?.generatedSamples ?? operation.response?.generatedVideos ?? [];
   const outputs: { buffer: Buffer; contentType: string; metadata: any }[] = [];
   for (const sample of samples) {

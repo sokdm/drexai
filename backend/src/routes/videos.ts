@@ -1,3 +1,4 @@
+import { dispatchGeneration } from "../services/generationDispatch.js";
 import { providerFor } from "../services/openrouter.js";
 import { sceneAudioFields } from "../services/sceneAudio.js";
 import { AIProject } from "../models/AIProject.js";
@@ -77,11 +78,10 @@ videosRouter.post("/generate", async (req, res, next) => {
     if (settings.sourceImageAssetId && !source) return res.status(404).json({ error: "Source image not found" });
     if (settings.projectId && !await AIProject.exists({ _id: settings.projectId, userId: req.user._id, ...(settings.sceneId ? { "scenes._id": settings.sceneId } : {}) })) return res.status(404).json({ error: "Project scene not found" });
     if (settings.sceneId && !settings.projectId) return res.status(400).json({ error: "A scene requires its project" });
-    await assertVideoQueueReady();
+
     reservation = await reserveCredits(String(req.user._id), terms, `video:${req.user._id}:${Date.now()}:${settings.motionPrompt.slice(0, 24)}`);
-    job = await VideoGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(settings.model), status: "queued", approvedCredits: credits });
-    const queued = await enqueueVideoJob(String(job._id));
-    if (!queued) processVideoJob(String(job._id)).catch(() => null);
+    job = await VideoGenerationJob.create({ ...settings, model: terms.model || settings.model, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(terms.model || settings.model), status: "queued", approvedCredits: credits });
+    await dispatchGeneration("video", String(job._id));
     res.status(202).json({ job });
   } catch (error) { const failed = job ? await VideoGenerationJob.findOneAndUpdate({ _id: job._id, status: "queued" }, { status: "failed", error: "Queue submission failed. Reserved credits released." }) : null;
     if (reservation && (!job || failed)) await releaseReservation(String(reservation._id), "queue_submission_failed");
