@@ -30,6 +30,7 @@ import { ImageToVideoPage } from "./pages/dashboard/ImageToVideoPage";
 import { VoiceStudioPage } from "./pages/dashboard/VoiceStudioPage";
 import { VideoEditorPage } from "./pages/dashboard/VideoEditorPage";
 import "./styles.css";
+import "./admin.css";
 
 const queryClient = new QueryClient();
 const tools = [

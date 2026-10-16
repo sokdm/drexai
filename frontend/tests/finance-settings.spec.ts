@@ -32,7 +32,7 @@ test("existing admin has wallet records and accurate missing-provider status", a
   else if (p === "/api/admin/provider-usage") data = { daily: [], models: [], providerActivity: [], note: "Local usage and account activity are separate." };
   return route.fulfill({ json: data });
  });
- await page.goto("/admin?section=Wallets"); await expect(page.getByText("1250", { exact: true })).toBeVisible();
+ await page.goto("/admin?section=Wallets"); await expect(page.getByText("1,250", { exact: true })).toBeVisible();
  await page.getByRole("navigation", { name: "Admin sections" }).getByRole("button", { name: "OpenRouter", exact: true }).click();
  await expect(page.getByText(/Management key required/)).toBeVisible(); await expect(page.getByText("Some records are stale or unavailable.")).toBeVisible(); expect(errors).toEqual([]);
 });
