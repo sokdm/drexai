@@ -7,9 +7,9 @@ import { ImageGenerationJob } from "../models/ImageGenerationJob.js";
 import { MediaAsset } from "../models/MediaAsset.js";
 import { requireAuth, requireCsrf } from "../middleware/auth.js";
 import { imageCreditCost, imageModels, stylePresets, validateImageSettings } from "../services/imageGeneration.js";
-import { enqueueImageJob } from "../services/imageQueue.js";
+import { assertImageQueueReady, enqueueImageJob } from "../services/imageQueue.js";
 import { deleteImageObject, signedImageUrl } from "../services/mediaStorage.js";
-import { reserveCredits } from "../services/wallet.js";
+import { reserveCredits, releaseReservation } from "../services/wallet.js";
 import { processImageJob } from "../workers/processImageJob.js";
 import { env } from "../config/env.js";
 import { pipeline } from "node:stream/promises";
@@ -47,13 +47,15 @@ imagesRouter.post("/quote", async (req, res, next) => {
 });
 
 imagesRouter.post("/generate", async (req, res, next) => {
+  let job: any, reservation: any;
   try {
     const settings = validateImageSettings(requestSchema.parse(req.body));
     const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("text_to_image", "gemini", settings, imageCreditCost(settings)));
     const credits = terms.credits;
     if (settings.approvedCredits !== credits) return res.status(400).json({ error: `Approve ${credits} credits before generating.` });
-    const reservation: any = await reserveCredits(String(req.user._id), terms, `image:${req.user._id}:${Date.now()}:${settings.prompt.slice(0, 24)}`);
-    const job = await ImageGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: "gemini", status: "queued", approvedCredits: credits });
+    await assertImageQueueReady();
+    reservation = await reserveCredits(String(req.user._id), terms, `image:${req.user._id}:${Date.now()}:${settings.prompt.slice(0, 24)}`);
+    job = await ImageGenerationJob.create({ ...settings, userId: req.user._id, reservationId: reservation?._id, provider: "gemini", status: "queued", approvedCredits: credits });
     emitImageJob(String(job._id), { status: job.status, job });
     const queued = await enqueueImageJob(String(job._id));
     if (!queued) {
@@ -63,6 +65,9 @@ imagesRouter.post("/generate", async (req, res, next) => {
     }
     res.status(202).json({ job });
   } catch (error) {
+    const failed = job ? await ImageGenerationJob.findOneAndUpdate({ _id: job._id, status: "queued" }, { status: "failed", error: "Queue submission failed. Reserved credits released." }) : null;
+    if (reservation && (!job || failed)) await releaseReservation(String(reservation._id), "queue_submission_failed");
+    if (job && !failed) return res.status(202).json({ job: await ImageGenerationJob.findById(job._id) });
     next(error);
   }
 });

@@ -132,8 +132,9 @@ aiRouter.post("/scripts/generate", async (req, res, next) => {
     reservation = await reserveCredits(String(req.user._id), quote, `story:${randomToken(8)}`);
     const niche = input.settings.nicheId ? await Niche.findOne({ _id: input.settings.nicheId, userId: req.user._id }) : null;
     const generated = await geminiJson({
+      model: quote.model, maxOutputTokens: 12000,
       schema: scriptProjectSchema,
-      system: "Create original, structured YouTube scripts. Return JSON with scenes only. Keep content appropriate for a general audience.",
+      system: "Create original, structured YouTube scripts. Return a JSON object with title, storyConcept, summary, characters (array) and scenes (array). Each scene must include order (number), title, sceneDescription, characters (string array), narration, dialogue, imagePrompt, videoMotionPrompt, cameraDirection, estimatedNarrationTiming, audioSuggestions and transitionSuggestions. All fields except order and characters are strings. Keep the result to at most 12 practical scenes. Keep content appropriate for a general audience.",
       prompt: `Generate a structured project with scene-level prompts. Settings: ${JSON.stringify(input.settings)}\nNiche: ${JSON.stringify(niche)}`
     });
     const project = await AIProject.create({

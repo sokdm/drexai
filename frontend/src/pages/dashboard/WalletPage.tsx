@@ -1,3 +1,4 @@
+import { useRealtime } from "../../lib/realtime";
 import { useEffect, useState } from "react";
 import { Coins, ReceiptText, ShieldCheck } from "lucide-react";
 import { Button } from "../../components/ui/Button";
@@ -10,7 +11,7 @@ export function WalletPage() {
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    setLoading(true);
+    setError("");
     try {
       const result = await api("/api/wallet");
       setData(result);
@@ -21,7 +22,8 @@ export function WalletPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); const refresh = () => { if (!document.hidden) void load(); }; window.addEventListener("focus", refresh); const timer = setInterval(refresh, 30000); return () => { window.removeEventListener("focus", refresh); clearInterval(timer); }; }, []);
+  useRealtime({ "notifications:changed": () => { void load(); }, connect: () => { void load(); } });
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const txRef = params.get("tx_ref");
@@ -48,7 +50,7 @@ export function WalletPage() {
     <div className="space-y-6">
       <section className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-          <div><p className="text-sm font-bold text-brand dark:text-brand-dark">Pay as you go</p><h2 className="mt-2 text-3xl font-black">Credit Wallet</h2><p className="mt-2 text-slate-600 dark:text-slate-300">Credits are added only after Flutterwave test payments are verified on the backend.</p></div>
+          <div><p className="text-sm font-bold text-brand dark:text-brand-dark">Pay as you go</p><h2 className="mt-2 text-3xl font-black">Credit Wallet</h2><button type="button" className="mt-2 text-sm text-brand" onClick={() => void load()}>Refresh balance</button><p className="mt-2 text-slate-600 dark:text-slate-300">Your balance includes verified purchases and documented administrator adjustments.</p></div>
           <div className="rounded-md bg-cloud p-5 dark:bg-slate-950"><Coins className="mb-3 text-brand" /><p className="text-4xl font-black">{data?.wallet?.availableCredits ?? 0}</p><p className="text-sm text-slate-500">available credits</p></div>
         </div>
         {error && <p className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700 dark:bg-red-950 dark:text-red-200">{error}</p>}

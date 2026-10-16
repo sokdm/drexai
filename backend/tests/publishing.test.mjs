@@ -20,7 +20,6 @@ import { LedgerEntry } from "../dist/models/LedgerEntry.js";
 import { YouTubeConnection } from "../dist/models/YouTubeConnection.js";
 import { ImageGenerationJob } from "../dist/models/ImageGenerationJob.js";
 import { MediaAsset } from "../dist/models/MediaAsset.js";
-import { imageQueue } from "../dist/services/imageQueue.js";
 import { scheduleSummary } from "../dist/services/publishing.js";
 import { encryptSecret } from "../dist/utils/encryption.js";
 import { hashSecret } from "../dist/utils/crypto.js";
@@ -52,7 +51,7 @@ before(async () => {
     throw new Error(`Unexpected external request ${u.hostname}`);
   };
 });
-after(async () => { globalThis.fetch = originalFetch; await imageQueue.close(); server?.closeAllConnections(); if (server) await new Promise(resolve => server.close(resolve)); await mongoose.disconnect(); await db?.stop(); });
+after(async () => { globalThis.fetch = originalFetch; server?.closeAllConnections(); if (server) await new Promise(resolve => server.close(resolve)); await mongoose.disconnect(); await db?.stop(); });
 async function request(path, options = {}) { const r = await fetch(base + path, { ...options, headers: { ...headers, ...options.headers } }); return { status: r.status, data: await r.json() }; }
 const post = data => ({ method: "POST", body: JSON.stringify(data) });
 test("publishing dashboard reuses completed exports and projects; future adapters are manual", async () => {

@@ -64,6 +64,7 @@ export async function geminiJson<T>(input: {
   const raw = await withProvider(selectedModel, () => withRetry(async () => {
     const response = await fetch(GEMINI_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(90000),
       headers: { "x-goog-api-key": env.GEMINI_API_KEY!, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: selectedModel,
@@ -86,6 +87,7 @@ export async function geminiText(input: { system: string; prompt: string; maxOut
   return withProvider(selectedModel, () => withRetry(async () => {
     const response = await fetch(GEMINI_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(90000),
       headers: { "x-goog-api-key": env.GEMINI_API_KEY!, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: selectedModel,
@@ -100,8 +102,11 @@ export async function geminiText(input: { system: string; prompt: string; maxOut
   }));
 }
 
-function extractText(data: any) {
-  return JSON.stringify(data);
+export function extractText(data: any): string {
+  if (typeof data.output_text === "string") return data.output_text;
+  const parts: string[] = [];
+  function collect(value: any) { if (!value || typeof value !== "object") return; if (value.type === "text" && typeof value.text === "string") { parts.push(value.text); return; } if (Array.isArray(value)) value.forEach(collect); else for (const key of ["outputs", "content", "steps", "output"]) if (value[key]) collect(value[key]); }
+  collect(data); if (!parts.length) throw new Error("Gemini returned no text. Review provider access and model configuration."); return parts.join("\n");
 }
 
 function parseJson(raw: string) {
@@ -112,7 +117,7 @@ function parseJson(raw: string) {
   return JSON.parse(trimmed);
 }
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, attempts = 0): Promise<T> {
   let lastError: unknown;
   for (let index = 0; index <= attempts; index += 1) {
     try {
@@ -122,5 +127,6 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
       await new Promise((resolve) => setTimeout(resolve, 400 * (index + 1)));
     }
   }
+  if (lastError instanceof Error && ["TimeoutError", "AbortError"].includes(lastError.name)) throw new Error("Gemini did not finish within 90 seconds. The request failed; try again with a shorter script.");
   throw lastError;
 }
