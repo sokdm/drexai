@@ -32,6 +32,7 @@ import { VideoEditorPage } from "./pages/dashboard/VideoEditorPage";
 import "./styles.css";
 import "./admin.css";
 import "./agent.css";
+import "./production-reference.css";
 
 const queryClient = new QueryClient();
 const tools = [
