@@ -20,9 +20,9 @@ import { GenerationPriceRule } from "../dist/models/GenerationPriceRule.js";
 import { ProviderControl } from "../dist/models/Admin.js";
 import { runMedia } from "../dist/services/ffmpeg.js";
 const original = globalThis.fetch, originalKey = env.OPENROUTER_API_KEY;
-let db, dir, mp3, video, png, fail = false, requests = [], pricingAvailable = false, blockGoogle = false;
+let db, dir, mp3, video, png, fail = false, requests = [], pricingAvailable = false, blockGoogle = false, textFinish = "stop";
 const models = [
- { id: "openai/gpt-4.1-mini", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], pricing: { prompt: "0.0000004", completion: "0.0000016" } },
+ { id: "openai/gpt-4.1-mini", top_provider: { max_completion_tokens: 16000 }, architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format", "reasoning"], pricing: { prompt: "0.0000004", completion: "0.0000016" } },
  { id: "google/gemini-3.8-flash", architecture: { input_modalities: ["text", "image", "video"], output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], pricing: { prompt: "0.000001", completion: "0.000002" } },
  { id: "google/gemini-3.8-flash-tts", architecture: { output_modalities: ["speech"] }, pricing: { prompt: "0.00001" } }
 ];
@@ -48,7 +48,7 @@ before(async () => {
   const body = options.body ? JSON.parse(options.body) : undefined; requests.push({ path: u.pathname, body });
   if (fail) return Response.json({ error: { message: "Quota test failure" } }, { status: 429 });
   if (blockGoogle && body?.model?.startsWith("google/") && u.pathname.endsWith("chat/completions")) return Response.json({ error: { message: "Paid model training violation (account settings)" } }, { status: 404 });
-  if (u.pathname.endsWith("chat/completions")) return Response.json({ id: "text-1", choices: [{ message: { content: '{"title":"Valid script"}' }, finish_reason: "stop" }], usage: { cost: 0.001, prompt_tokens: 10, completion_tokens: 5 } });
+  if (u.pathname.endsWith("chat/completions")) return Response.json({ id: textFinish === "length" ? "text-truncated" : "text-1", choices: [{ message: { content: '{"title":"Valid script"}' }, finish_reason: textFinish }], usage: { cost: 0.001, prompt_tokens: 10, completion_tokens: 5, completion_tokens_details: { reasoning_tokens: textFinish === "length" ? 4990 : 0 } } });
   if (u.pathname === "/api/v1/images") return Response.json({ data: [{ b64_json: png.toString("base64"), media_type: "image/png" }], usage: { cost: 0.04 } });
   if (u.pathname.endsWith("audio/speech")) return new Response(mp3, { headers: { "content-type": "audio/mpeg" } });
   if (u.pathname === "/api/v1/videos") return Response.json({ id: "job-1", status: "pending" }, { status: 202 });
@@ -102,9 +102,9 @@ test("credit rule and approved quote remain stable when defaults and prices chan
  await CreditPackage.create({ key: "creator", name: "Creator", credits: 5000, amount: 90, currency: "USD", active: true });
  const model = "openrouter/google/gemini-nano-banana-2.1", userId = new mongoose.Types.ObjectId();
  await GenerationPriceRule.create({ feature: "text_to_image", provider: "openrouter", model, unit: "image:1K", creditsPerUnit: 8, providerCostUsd: 0.04, active: true });
- const settings = { model, resolution: "1K", numberOfImages: 2 }; const quote = await managedPrice("text_to_image", "openrouter", settings, 2); assert.equal(quote.credits, 40);
+ const settings = { model, resolution: "1K", numberOfImages: 2 }; const quote = await managedPrice("text_to_image", "openrouter", settings, 2); assert.equal(quote.credits, 14);
  await rememberQuote(userId, settings, quote); await PricingPolicy.create({ _id: "global", revision: 2, values: { ...defaultPricingPolicy, markup: 12 } });
- assert.equal((await approvedTerms(userId, settings, 40, () => managedPrice("text_to_image", "openrouter", settings, 2))).credits, 40);
+ assert.equal((await approvedTerms(userId, settings, 14, () => managedPrice("text_to_image", "openrouter", settings, 2))).credits, 14);
  await GatewayBinding.create({ _id: "story_generation", model: "openrouter/google/gemini-3.8-flash" }); assert.equal(await defaultModel("story_generation", "legacy"), "openrouter/google/gemini-3.8-flash");
 });
 test("unbounded Google image pricing proposes a verified compatible FLUX quote before approval", async () => {
@@ -143,4 +143,23 @@ test("admin gateway routing requires admin session and CSRF, validates modality,
   assert.equal(await GatewayBinding.findById("ai_channel_analysis"), null);
   assert.notEqual((await original(url, { method: "PUT", headers, body: JSON.stringify({ feature: "voice", model: "openrouter/google/gemini-3.8-flash", reason: "Invalid modality must be rejected" }) })).status, 200);
  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
+
+test("script requests use the approved output allowance and timeout, and send reasoning only when supported", async () => {
+ const originalTimeout = AbortSignal.timeout, timeouts = [];
+ await ProviderControl.updateOne({model:"openrouter/google/gemini-3.8-flash"}, {enabled:true});
+ AbortSignal.timeout = ms => { timeouts.push(ms); return originalTimeout(ms); };
+ try {
+  await routerText({ model:"openrouter/openai/gpt-4.1-mini",system:"Script",prompt:"Write two scenes",maxOutputTokens:12000,timeoutMs:180000,reasoningEffort:"low",requestLimits:{maxInputTokens:20000,maxOutputTokens:12000} });
+  assert.equal(requests.at(-1).body.max_tokens,12000); assert.deepEqual(requests.at(-1).body.reasoning,{effort:"low"}); assert.ok(timeouts.includes(180000));
+  await routerText({model:"openrouter/openai/gpt-4.1-mini",system:"Script",prompt:"Write",maxOutputTokens:30000,requestLimits:{maxInputTokens:20000,maxOutputTokens:30000}}); assert.equal(requests.at(-1).body.max_tokens,16000);
+  await routerText({ model:"openrouter/google/gemini-3.8-flash",system:"Script",prompt:"Write two scenes",maxOutputTokens:12000,reasoningEffort:"low",requestLimits:{maxInputTokens:20000,maxOutputTokens:3000} });
+  assert.equal(requests.at(-1).body.max_tokens,3000); assert.equal(requests.at(-1).body.reasoning,undefined);
+ } finally { AbortSignal.timeout = originalTimeout; await ProviderControl.updateOne({model:"openrouter/google/gemini-3.8-flash"}, {enabled:false}); }
+});
+test("truncated output records its actual finish reason and reported reasoning usage", async () => {
+ textFinish="length";
+ try { await assert.rejects(routerText({model:"openrouter/openai/gpt-4.1-mini",system:"Script",prompt:"Write",maxOutputTokens:5000}), error => { assert.equal(error.code,"INCOMPLETE_PROVIDER_OUTPUT"); assert.equal(error.finishReason,"length"); assert.equal(error.usage.completion_tokens_details.reasoning_tokens,4990); assert.match(error.message,/output limit: 5000/); return true; });
+ const usage=await GatewayUsage.findOne({requestId:"text-truncated"}); assert.equal(usage.usage.finish_reason,"length"); assert.equal(usage.costUsd,.001);
+ } finally { textFinish="stop"; }
 });

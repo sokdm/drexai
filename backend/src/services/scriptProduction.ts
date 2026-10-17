@@ -14,7 +14,7 @@ export async function processScriptJob(job: any, request = routerText) {
  const input = job.input, shape = scriptShape(input.settings), quote = job.quote;
  const invoke = async (schema: any, system: string, prompt: string) => {
   await ScriptJob.updateOne({ _id: job._id }, { inFlight: true, leaseUntil: new Date(Date.now() + 240000) });
-  const options = { model: quote.model, userId: String(job.userId), reservationId: String(job.reservationId), requestLimits: quote.requestLimits, schema, maxOutputTokens: 5000, timeoutMs: 180000, system, prompt };
+  const options = { model: quote.model, userId: String(job.userId), reservationId: String(job.reservationId), requestLimits: quote.requestLimits, schema, maxOutputTokens: Math.min(12000, quote.requestLimits?.maxOutputTokens ?? 5000), reasoningEffort: "low" as const, timeoutMs: 180000, system, prompt };
   let raw: string;
   try { raw = await request(options); }
   catch (e: any) {
@@ -40,7 +40,7 @@ export async function processScriptJob(job: any, request = routerText) {
    const count = Math.min(2, plan.scenes.length - index), duration = shape.seconds / shape.scenes;
    await log(job, "writing", `Writing scenes ${index + 1} to ${index + count} of ${plan.scenes.length}`);
    const schema = z.object({ scenes: scriptProjectSchema.shape.scenes });
-   const result = await invoke(schema, "Write fully developed original screenplay scenes as JSON. Include narration, attributed dialogue, scene descriptions, camera directions, image prompts, video motion prompts, sound descriptions and transition suggestions. Match language and tone. Narration plus dialogue should contain approximately 120-150 spoken words per minute of scene duration. Do not shorten to a synopsis. Scene lengths describe the edited story, NOT a single provider video clip. Audio and shot prompts are descriptive, not model-specific. Include the hook in the first scene and a complete ending in the last. Do not repeat prior scenes.", JSON.stringify({ settings: input.settings, characters: plan.characters, story: plan.summary, scenes: plan.scenes.slice(index, index + count), startOrder: index + 1, secondsPerScene: duration, precedingScene: project.scenes.at(-1)?.narration || "", instruction: input.message }));
+   const result = await invoke(schema, "Write fully developed original screenplay scenes as JSON. Include narration, attributed dialogue, scene descriptions, camera directions, image prompts, video motion prompts, sound descriptions and transition suggestions. Match language and tone. Narration plus dialogue should contain approximately 120-150 spoken words per minute of scene duration. Do not shorten to a synopsis. Scene lengths describe the edited story, NOT a single provider video clip. Audio and shot prompts are descriptive, not model-specific. Include the hook in the first scene and a complete ending in the last. Do not repeat prior scenes. Keep non-spoken technical directions concise: each image/video prompt under 100 words, other direction fields under 40 words. Supply only the required JSON, without explanations.", JSON.stringify({ settings: input.settings, characters: plan.characters, story: plan.summary, scenes: plan.scenes.slice(index, index + count), startOrder: index + 1, secondsPerScene: duration, precedingScene: project.scenes.at(-1)?.narration || "", instruction: input.message }));
    if (result.scenes.length !== count) throw new Error("The provider returned an incomplete scene batch; completed scenes were preserved");
    const scenes = result.scenes.map((scene: any, i: number) => ({ ...scene, order: index + i + 1, estimatedDurationSeconds: duration }));
    const words = scenes.reduce((n: number, s: any) => n + (s.narration + " " + s.dialogue).split(/\s+/).filter(Boolean).length, 0);
@@ -83,6 +83,7 @@ export async function processScriptJob(job: any, request = routerText) {
  } catch (error: any) {
   const uncertain = /abort|timeout|network|fetch failed/i.test(error.message);
   await log(job, "error", error.message);
+  if (error.code === "INCOMPLETE_PROVIDER_OUTPUT") await ScriptJob.updateOne({ _id: job._id }, { outputFailure: { finishReason: error.finishReason, maxOutputTokens: error.maxOutputTokens, usage: error.usage, requestId: error.requestId } });
   await ScriptJob.updateOne({ _id: job._id }, { status: uncertain ? "needs_review" : "failed", error: error.message });
   // Ambiguous provider submissions must not be retried or declared free automatically.
   if (!uncertain) await releaseReservation(String(job.reservationId), "script_stage_failed");

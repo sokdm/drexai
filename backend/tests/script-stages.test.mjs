@@ -27,3 +27,15 @@ test("targeted agent revision changes the real project and preserves other scene
  await processScriptJob(j,mock());const result=await AIProject.findById(original._id);
  assert.equal((await ScriptJob.findById(j._id)).status,"completed");assert.equal(result.scenes[0].narration,"Keep original words");assert.notEqual(result.scenes[2].narration,"Keep original words");assert.deepEqual(result.scenes.map(s=>String(s._id)),beforeIds);assert.equal(result.versions.length,1);assert.equal(result.title,"Original title");
 });
+
+test("script worker uses frozen approved token limits rather than the old hardcoded 5000", async()=>{
+ const j=await job(); j.quote={...j.quote,requestLimits:{maxInputTokens:20000,maxOutputTokens:12000}}; await j.save(); const response=mock();
+ await processScriptJob(j,async input=>{assert.equal(input.maxOutputTokens,12000);assert.equal(input.reasoningEffort,"low");return response(input);});
+ assert.equal((await ScriptJob.findById(j._id)).status,"completed");
+});
+
+test("truncation preserves saved batches and diagnostics without an unapproved paid retry",async()=>{
+ const j=await job();const response=mock();let calls=0;
+ await processScriptJob(j,async input=>{calls++;if(calls===3)throw Object.assign(new Error("OpenRouter reached its output token limit"),{code:"INCOMPLETE_PROVIDER_OUTPUT",finishReason:"length",maxOutputTokens:5000,usage:{cost:.001,completion_tokens:5000},requestId:"truncated-fixture"});return response(input);});
+ const saved=await ScriptJob.findById(j._id);assert.equal(calls,3);assert.equal(saved.status,"failed");assert.equal(saved.cursor,2);assert.equal(saved.outputFailure.finishReason,"length");assert.equal(saved.outputFailure.requestId,"truncated-fixture");assert.equal((await AIProject.findById(saved.resultProjectId)).scenes.length,2);
+});

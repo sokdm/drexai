@@ -53,10 +53,10 @@ export async function routerResponse(endpoint: string, body?: any, timeout = 180
 export async function recordRouterUsage(id: string, kind: string, data: any, userId?: string, reservationId?: string) {
   if (mongoose.connection.readyState !== 1) return;
   const value = data.usage?.cost, costUsd = (typeof value === "number" || typeof value === "string" && value.trim() !== "") && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : undefined;
-  const requestId = data.id || data.generation_id, values = { model: id, kind, userId, reservationId, ...(requestId ? { requestId } : {}), usage: data.usage || {}, costUsd, status: "completed" };
+  const requestId = data.id || data.generation_id, values = { model: id, kind, userId, reservationId, ...(requestId ? { requestId } : {}), usage: { ...(data.usage || {}), ...(data.choices?.[0]?.finish_reason ? { finish_reason: data.choices[0].finish_reason } : {}) }, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-type TextInput = { timeoutMs?: number; reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
+type TextInput = { reasoningEffort?: "low"; timeoutMs?: number; reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
 export async function routerText(input: TextInput) {
  const { withProvider, assertProviderBudget } = await import("./platformControl.js");
  const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(!input.media?.length ? input.requestLimits?.fallbacks || [] : [])];
@@ -80,12 +80,20 @@ async function routerTextAttempt(input: TextInput) {
   const inputBytes = Buffer.byteLength(input.system + input.prompt, "utf8");
   if (inputBytes > limits.maxInputTokens) throw new Error("Input exceeds this quote's conservative text token limit. Shorten the context or obtain a new verified quote.");
   if (supported.includes("max_tokens")) body.max_tokens = Math.min(input.maxOutputTokens ?? 5000, limits.maxOutputTokens);
+  const modelOutputLimit = Number(record.top_provider?.max_completion_tokens ?? record.max_completion_tokens);
+  if (Number.isFinite(modelOutputLimit) && modelOutputLimit > 0) body.max_tokens = Math.min(body.max_tokens, Math.floor(modelOutputLimit));
+  if (input.reasoningEffort && supported.includes("reasoning")) body.reasoning = { effort: input.reasoningEffort };
   if (input.schema) body.response_format = { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: geminiSchema(input.schema) } };
   if (input.onDelta) { body.stream = true; body.stream_options = { include_usage: true }; const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId, input.reservationId); return result.text; }
-  const response = await routerResponse("chat/completions", body, 90000), data = await response.json();
+  const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000), data = await response.json();
   await recordRouterUsage(input.model, "text", data, input.userId, input.reservationId);
   const result = data.choices?.[0]?.message?.content;
-  if (typeof result !== "string" || !result.trim() || data.choices?.[0]?.finish_reason === "length") throw new Error("OpenRouter returned an incomplete result. Review the model output limit.");
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (typeof result !== "string" || !result.trim() || finishReason === "length") {
+    const reasoningTokens = data.usage?.completion_tokens_details?.reasoning_tokens;
+    const reason = finishReason === "length" ? "reached its output token limit" : finishReason === "content_filter" ? "filtered the response" : "returned no usable text";
+    throw Object.assign(new Error(`OpenRouter ${reason} (model: ${input.model}, finish reason: ${finishReason || "unknown"}, output limit: ${body.max_tokens}${typeof reasoningTokens === "number" ? `, reasoning tokens: ${reasoningTokens}` : ""}). Completed work was not replaced.`), { code: "INCOMPLETE_PROVIDER_OUTPUT", finishReason, maxOutputTokens: body.max_tokens, usage: data.usage, requestId: data.id });
+  }
   return result;
 }
 export async function routerImages(settings: any) {
