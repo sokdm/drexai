@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ScriptJob } from "../models/ScriptJob.js";
 import { AIProject } from "../models/AIProject.js";
 import { CharacterProfile } from "../models/CharacterProfile.js";
-import { routerText } from "./openrouter.js";
+import { routerText, GatewayUsage } from "./openrouter.js";
 import { AIConversation } from "../models/AIConversation.js";
 import { scriptProjectSchema } from "./gemini.js";
 import { settleReservation, releaseReservation } from "./wallet.js";
@@ -20,6 +20,17 @@ export function scriptBatchSchema(start: number, count: number) {
   }
   return value;
  }, object);
+}
+export function spokenWordCount(scene: any) {
+ const speech = [scene.narration || "", scene.dialogueLines?.length ? scene.dialogueLines.map((line: any) => line.text).join(" ") : scene.dialogue || ""].join(" ");
+ return speech.trim().split(/\s+/).filter(Boolean).length;
+}
+export function scriptExpansionFits(quote: any, rows: any[], remainingCalls: number) {
+ const ceiling = Number(quote.estimatedCostUsd), calls = Number(quote.quantity);
+ if (!(ceiling > 0) || !Number.isSafeInteger(calls) || calls < 1 || !Number.isSafeInteger(remainingCalls) || remainingCalls < 0 || !rows.length || rows.some(r => typeof r.costUsd !== "number" || !Number.isFinite(r.costUsd) || r.costUsd < 0)) return false;
+ const spent = rows.reduce((n, r) => n + r.costUsd, 0);
+ // Retain the frozen worst-case allowance for every remaining batch plus this expansion.
+ return spent + ceiling / calls * (remainingCalls + 1) <= ceiling - 0.000000001;
 }
 async function log(job: any, stage: string, message: string) { await ScriptJob.updateOne({ _id: job._id }, { $push: { logs: { stage, message, at: new Date() } }, leaseUntil: new Date(Date.now() + 240000) }); }
 export async function processScriptJob(job: any, request = routerText) {
@@ -58,15 +69,36 @@ export async function processScriptJob(job: any, request = routerText) {
    await log(job, "writing", `Writing scenes ${index + 1} to ${index + count} of ${plan.scenes.length}`);
    const keys = Array.from({ length: count }, (_, i) => `scene_${index + i + 1}`);
    const schema = scriptBatchSchema(index + 1, count);
-   const result = await invoke(schema, "Return one JSON object with exactly these REQUIRED keys: " + keys.join(", ") + ". Each key contains one complete scene object. Do not return a scenes array, a single combined scene, or scenes outside this batch. Write fully developed original screenplay scenes. Include narration, attributed dialogue, scene descriptions, camera directions, image prompts, video motion prompts, sound descriptions and transition suggestions. Match language and tone. Narration plus dialogue should contain approximately 120-150 spoken words per minute of scene duration. Do not shorten to a synopsis. Scene lengths describe the edited story, NOT a single provider video clip. Audio and shot prompts are descriptive, not model-specific. Include the hook in the first scene and a complete ending in the last. Do not repeat prior scenes. Keep non-spoken technical directions concise: each image/video prompt under 100 words, other direction fields under 40 words. Supply only the required JSON, without explanations.", JSON.stringify({ settings: input.settings, characters: plan.characters, story: plan.summary, requiredSceneKeys: keys, requiredSceneCount: count, scenes: plan.scenes.slice(index, index + count), startOrder: index + 1, secondsPerScene: duration, precedingScene: project.scenes.at(-1)?.narration || "", instruction: input.message }));
-   const scenes = keys.map((key, i) => ({ ...result[key], order: index + i + 1, estimatedDurationSeconds: duration }));
-   const words = scenes.reduce((n: number, s: any) => n + (s.narration + " " + (s.dialogueLines?.length ? s.dialogueLines.map((line: any) => line.text).join(" ") : s.dialogue)).split(/\s+/).filter(Boolean).length, 0);
-   if (words < duration * count * 1.8) throw new Error("The scene batch is too short for the requested duration; partial work was preserved");
+   const wordTarget = { minimumPerScene: Math.ceil(duration * 2), targetPerScene: Math.ceil(duration * 2.4), maximumPerScene: Math.ceil(duration * 2.8) };
+   const result = await invoke(schema, "Return one JSON object with exactly these REQUIRED keys: " + keys.join(", ") + ". Each key contains one complete scene object. Do not return a scenes array, a single combined scene, or scenes outside this batch. Write fully developed original screenplay scenes. Include narration, attributed dialogue, scene descriptions, camera directions, image prompts, video motion prompts, sound descriptions and transition suggestions. Match language and tone. Meet the supplied spokenWordTarget separately for EACH scene using narration plus dialogue. Develop actual action, discoveries, conflict and character decisions; do not provide a synopsis or repeat filler to meet length. Technical directions do not count as spoken words. Scene lengths describe the edited story, NOT a single provider video clip. Audio and shot prompts are descriptive, not model-specific. Include the hook in the first scene and a complete ending in the last. Do not repeat prior scenes. Keep non-spoken technical directions concise: each image/video prompt under 100 words, other direction fields under 40 words. Supply only the required JSON, without explanations.", JSON.stringify({ settings: input.settings, characters: plan.characters, story: plan.summary, requiredSceneKeys: keys, requiredSceneCount: count, scenes: plan.scenes.slice(index, index + count), startOrder: index + 1, secondsPerScene: duration, spokenWordTarget: wordTarget, precedingScene: project.scenes.at(-1)?.narration || "", instruction: input.message }));
+   let scenes = keys.map((key, i) => ({ ...result[key], order: index + i + 1, estimatedDurationSeconds: duration }));
+   if (scenes.some(s => spokenWordCount(s) < duration * 1.8)) {
+    // Persist the usable response before considering another billable request.
+    await ScriptJob.updateOne({ _id: job._id }, { pendingBatch: { index, scenes } });
+    const usage = await GatewayUsage.find({ reservationId: job.reservationId, status: "completed" }).lean();
+    const remaining = Math.ceil((plan.scenes.length - index - count) / 2);
+    if (scriptExpansionFits(quote, usage, remaining)) {
+     await log(job, "expanding", `Developing scenes ${index + 1} to ${index + count} within the approved provider-cost ceiling`);
+     try {
+      const expanded = await invoke(schema, "Expand the supplied short screenplay scenes into developed narration and dialogue. Return exactly the required scene keys with complete scene objects. Meet spokenWordTarget per scene. Preserve titles, continuity, speaker identities and visual prompts. Add meaningful story beats, not repeated padding. No explanations outside JSON.", JSON.stringify({ requiredSceneKeys: keys, scenes, spokenWordTarget: wordTarget, language: input.settings.language, story: plan.summary }));
+      scenes = scenes.map((s, i) => spokenWordCount(expanded[keys[i]]) > spokenWordCount(s) ? { ...expanded[keys[i]], order: s.order, estimatedDurationSeconds: duration } : s);
+     } catch (error: any) {
+      if (/abort|timeout|network|fetch failed/i.test(error.message)) throw error;
+      const after = await GatewayUsage.find({ reservationId: job.reservationId, status: "completed" }).lean();
+      if (!error.providerRejected && !(after.length > usage.length && after.every(r => typeof r.costUsd === "number" && Number.isFinite(r.costUsd) && r.costUsd >= 0))) throw Object.assign(new Error("The optional expansion's provider charge could not be confirmed. Its saved draft is preserved for billing review; no additional call will be submitted."), { billingUncertain: true });
+      await log(job, "review", "The optional expansion was not usable. Keeping the saved draft and estimating its actual spoken length.");
+     }
+    } else await log(job, "review", "Keeping the valid draft. Additional expansion would require a new approved quote or verified provider usage.");
+   }
+   scenes = scenes.map(s => ({ ...s, estimatedDurationSeconds: Math.max(1, Math.round(spokenWordCount(s) * 3 / 7)) }));
    project.scenes.push(...scenes); await project.save();
-   await ScriptJob.updateOne({ _id: job._id }, { cursor: index + count, inFlight: false });
+   await ScriptJob.updateOne({ _id: job._id }, { cursor: index + count, inFlight: false, $unset: { pendingBatch: "" } });
    await log(job, "prompts", `Saved scenes ${index + 1} to ${index + count}, including dialogue and visual prompts`);
   }
-  project.prompts = { ...project.prompts, partial: false };
+  const estimatedSeconds = project.scenes.reduce((n: number, s: any) => n + (s.estimatedDurationSeconds || 0), 0);
+  const durationReview = estimatedSeconds < shape.seconds * .9;
+  project.prompts = { ...project.prompts, partial: false, durationEstimate: { requestedSeconds: shape.seconds, estimatedSeconds, needsReview: durationReview, note: "Speech timing is estimated; delivery and visual pauses affect final duration." } };
+  if (durationReview) await log(job, "review", `Draft saved: approximately ${estimatedSeconds} seconds of scene timing versus ${shape.seconds} requested. Review or request a longer revision; no duration was invented.`);
   if (input.projectId) {
    const existing = await AIProject.findOne({ _id: input.projectId, userId: job.userId });
    if (!existing || existing.updatedAt.getTime() !== new Date(job.baseUpdatedAt).getTime()) throw new Error("The project changed while the agent was writing. The agent draft is saved separately; review it before replacing your edits.");
@@ -86,7 +118,7 @@ export async function processScriptJob(job: any, request = routerText) {
    if (target && (Number(target[1]) < 1 || Number(target[1]) > existing.scenes.length)) throw new Error("Requested scene does not exist. Agent draft preserved separately.");
    existing.scenes = revised as any;
    existing.targetDuration = input.settings.targetDuration;
-   existing.prompts = { ...existing.prompts, partial: false, sourceSettings: input.settings };
+   existing.prompts = { ...existing.prompts, partial: false, sourceSettings: input.settings, durationEstimate: project.prompts.durationEstimate };
    if (!target && !promptsOnly && !dialogueOnly) { existing.summary = project.summary; existing.title = project.title; }
    existing.approvedAt = undefined; existing.aiStudioReadyAt = undefined; await existing.save();
    await CharacterProfile.updateMany({ projectId: project._id, userId: job.userId }, { projectId: existing._id });
@@ -98,7 +130,7 @@ export async function processScriptJob(job: any, request = routerText) {
   await settleReservation(String(job.reservationId));
   await ScriptJob.updateOne({ _id: job._id }, { status: "completed", inFlight: false });
  } catch (error: any) {
-  const uncertain = /abort|timeout|network|fetch failed/i.test(error.message);
+  const uncertain = error.billingUncertain === true || /abort|timeout|network|fetch failed/i.test(error.message);
   await log(job, "error", error.message);
   if (error.code === "INCOMPLETE_PROVIDER_OUTPUT") await ScriptJob.updateOne({ _id: job._id }, { outputFailure: { finishReason: error.finishReason, maxOutputTokens: error.maxOutputTokens, usage: error.usage, requestId: error.requestId } });
   await ScriptJob.updateOne({ _id: job._id }, { status: uncertain ? "needs_review" : "failed", error: error.message });

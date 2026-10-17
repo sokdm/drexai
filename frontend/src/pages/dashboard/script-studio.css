@@ -22,3 +22,5 @@
 .script-log .script-log-latest{min-height:26px;padding:4px 7px;font-size:9px}
 @media(min-width:681px) and (max-width:1100px){.script-sidebar{height:auto;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:360px}.script-log{max-height:none}}
 @media(max-width:680px){.script-sidebar{height:auto;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(240px,auto) 320px;overflow:visible}.script-assistant{max-height:400px}.script-log{min-height:0;max-height:none}}
+
+.script-duration-note{padding:10px;border:1px solid #bb943b66;border-radius:7px;background:#b98a1910;color:var(--ss-text);font-size:11px;line-height:1.6;margin:12px 0}

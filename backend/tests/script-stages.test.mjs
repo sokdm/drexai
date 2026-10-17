@@ -1,10 +1,11 @@
+import { GatewayUsage } from "../dist/services/openrouter.js";
 import { geminiSchema } from "../dist/services/geminiSchema.js";
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
-import { processScriptJob, scriptShape, scriptBatchSchema } from "../dist/services/scriptProduction.js";
+import { processScriptJob, scriptShape, scriptBatchSchema, scriptExpansionFits } from "../dist/services/scriptProduction.js";
 import { ScriptJob } from "../dist/models/ScriptJob.js";
 import { AIProject } from "../dist/models/AIProject.js";
 import { MediaAsset } from "../dist/models/MediaAsset.js";
@@ -53,4 +54,29 @@ test("an omitted scene never erases saved batches or triggers an additional char
  const j=await job(), response=mock();let calls=0;
  await processScriptJob(j,async input=>{calls++;if(calls===3)return JSON.stringify({scene_3:scene(3)});return response(input);});
  const saved=await ScriptJob.findById(j._id);assert.equal(calls,3);assert.equal(saved.status,"failed");assert.equal(saved.cursor,2);assert.match(saved.error,/scene_4/);assert.equal((await AIProject.findById(saved.resultProjectId)).scenes.length,2);
+});
+
+test("expansion budget requires verified costs and protects all remaining writing calls",()=>{
+ const q={estimatedCostUsd:.09,quantity:9};
+ assert.equal(scriptExpansionFits(q,[{costUsd:.002}],7),true);
+ assert.equal(scriptExpansionFits(q,[{costUsd:.02}],7),false);
+ assert.equal(scriptExpansionFits(q,[{costUsd:undefined}],0),false);
+ assert.equal(scriptExpansionFits(q,[],0),false);
+});
+test("a short valid draft completes with honest duration instead of an error when extra cost is unverified",async()=>{
+ const j=await job(),response=mock();let calls=0;
+ await processScriptJob(j,async input=>{calls++;if(calls===1)return response(input);const d=JSON.parse(input.prompt);return JSON.stringify(Object.fromEntries(d.requiredSceneKeys.map((key,i)=>[key,{...scene(d.startOrder+i),narration:"The explorer finds a hidden city and faces a difficult decision."}])));});
+ const saved=await ScriptJob.findById(j._id),p=await AIProject.findById(saved.projectId);
+ assert.equal(saved.status,"completed");assert.equal(calls,9);assert.equal(p.scenes.length,16);assert.equal(p.prompts.partial,false);assert.equal(p.prompts.durationEstimate.needsReview,true);assert.ok(p.prompts.durationEstimate.estimatedSeconds<480);assert.equal(saved.error,undefined);
+});
+test("short scenes are expanded once within the original approved ceiling without another reservation",async()=>{
+ const j=await job();j.quote={...j.quote,estimatedCostUsd:.09,quantity:9};await j.save();const response=mock();let calls=0;
+ await processScriptJob(j,async input=>{
+  calls++;await GatewayUsage.create({reservationId:j.reservationId,kind:"text",status:"completed",costUsd:.001,requestId:"expand-"+j._id+"-"+calls});
+  if(calls===1)return response(input);
+  const d=JSON.parse(input.prompt),expanded=input.system.startsWith("Expand");
+  return JSON.stringify(Object.fromEntries(d.requiredSceneKeys.map((key,i)=>[key,{...scene(Number(key.split("_")[1])),narration:expanded?Array(75).fill("developed").join(" "):"A brief discovery."}])));
+ });
+ const saved=await ScriptJob.findById(j._id),p=await AIProject.findById(saved.projectId);
+ assert.equal(saved.status,"completed");assert.equal(calls,17);assert.equal(p.prompts.durationEstimate.needsReview,false);assert.equal(p.scenes.length,16);assert.equal(saved.logs.filter(l=>l.stage==="expanding").length,8);assert.equal(String(saved.reservationId),String(j.reservationId));assert.equal(saved.pendingBatch,undefined);
 });
