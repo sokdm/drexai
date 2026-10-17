@@ -19,7 +19,7 @@ export function retainTimelineRanges(input: EditorTimeline, ranges: [number, num
   let previous = 0;
   for (const [start, end] of ranges) { if (start < previous || end <= start || end > total + .001) throw new Error("Invalid retained timeline intervals"); previous = end; }
   if (!ranges.length) throw new Error("The entire selection is silent. No changes applied.");
-  const result: EditorTimeline = { ...original, clips: [], audio: [], captions: [] }; let offset = 0;
+  const result: EditorTimeline = { ...original, clips: [], audio: [], captions: [], ...(original.overlays ? { overlays: [] } : {}) }; let offset = 0;
   for (const [from, to] of ranges) {
     for (const c of original.clips) {
       const at = clipStart(original, c.id), start = Math.max(from, at), end = Math.min(to, at + c.duration);
@@ -36,6 +36,11 @@ export function retainTimelineRanges(input: EditorTimeline, ranges: [number, num
       const at = trackStart(original, c), start = Math.max(from, at), end = Math.min(to, at + c.end - c.start);
       if (end <= start) continue;
       result.captions.push({ ...c, id: randomUUID(), anchorClipId: undefined, start: offset + start - from, end: offset + end - from });
+    }
+    for (const o of original.overlays || []) {
+      const start = Math.max(from,o.start), end = Math.min(to,o.start+o.duration);
+      if (end-start < .1) continue;
+      result.overlays!.push({...o,id:randomUUID(),start:offset+start-from,sourceIn:o.kind === "video" ? o.sourceIn+start-o.start : o.sourceIn,duration:end-start});
     }
     offset += to - from;
   }

@@ -1,3 +1,5 @@
+import sharp from "sharp";
+import { randomUUID } from "node:crypto";
 import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
 import { editingCommand } from "../services/editorCommands.js";
 import { createQuote, reserveCredits, releaseReservation } from "../services/wallet.js";
@@ -14,14 +16,14 @@ import { VideoEdit, VideoExport, RenderWorker } from "../models/VideoEdit.js";
 import { StudioProduction } from "../models/StudioProduction.js";
 import { AIProject } from "../models/AIProject.js";
 import { MediaAsset } from "../models/MediaAsset.js";
-import { persistentStorageConfigured, signedImageUrl, openMediaStream } from "../services/mediaStorage.js";
+import { uploadImage, uploadVideo, persistentStorageConfigured, signedImageUrl, openMediaStream } from "../services/mediaStorage.js";
 import { roughCut, validateTimelineAssets, editorFail, editorAssetUrl, uploadEditorAudio, editingSuggestions, captionsFromTranscript } from "../services/videoEditing.js";
 import { env } from "../config/env.js";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { editorAssetBytes } from "../services/videoEditing.js";
-import { renderTimeline, runMedia } from "../services/ffmpeg.js";
+import { probeMedia, renderTimeline, runMedia } from "../services/ffmpeg.js";
 import { speechRanges, retainTimelineRanges } from "../services/silenceEditing.js";
 import { withProvider } from "../services/platformControl.js";
 import { measureWaveform } from "../services/waveform.js";
@@ -58,7 +60,7 @@ editorRouter.get("/edits/:id", wrap(async (req, res) => {
   const edit = await own(req);
   const assets = await MediaAsset.find({ userId: req.user._id, deletedAt: null, $or: [{ projectId: edit.projectId }, { projectId: { $exists: false } }, { productionId: edit.productionId }] }).sort({ createdAt: -1 }).limit(500).lean();
   // Include every timeline asset even when it was reused from a different production.
-  const referenced = [...edit.timeline.clips.map((c: any) => c.assetId), ...edit.timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
+  const referenced = [...edit.timeline.clips.map((c: any) => c.assetId), ...(edit.timeline.overlays || []).map((o: any) => o.assetId), ...edit.timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
   const missing = await MediaAsset.find({ _id: { $in: referenced.filter((id: string) => !assets.some(a => String(a._id) === id)) }, userId: req.user._id, deletedAt: null }).lean();
   const exports = await VideoExport.find({ editId: edit._id, userId: req.user._id }).select("-timeline -leaseToken").sort({ createdAt: -1 }).limit(20).lean();
   res.json({ edit, assets: [...assets, ...missing].map(publicAsset), exports, readiness: await readiness() });
@@ -151,4 +153,26 @@ editorRouter.post("/exports/:exportId/save", wrap(async (req, res) => {
   const job = await ownExport(req); if (job.status !== "completed") editorFail("Export is not ready", 409);
   await AIProject.updateOne({ _id: job.projectId, userId: req.user._id }, { $set: { finalExportId: job._id, latestEditId: job.editId } });
   job.savedToProjectAt = new Date(); await job.save(); res.json({ export: job });
+}));
+
+editorRouter.post("/edits/:id/visual", raw({type:["image/png","image/jpeg","image/webp","video/mp4","video/webm"],limit:"100mb"}),wrap(async(req,res)=>{
+ const edit=await own(req);if(!persistentStorageConfigured())editorFail("Configure private R2 storage before uploading visuals",503);
+ if(!Buffer.isBuffer(req.body)||!req.body.length)editorFail("Upload a PNG, JPEG, WebP, MP4 or WebM file");
+ if(req.headers["x-license-confirmed"]!=="true")editorFail("Confirm permission to use this media");
+ const name=String(req.headers["x-file-name"]||"Uploaded visual").slice(0,150), contentType=String(req.headers["content-type"]||"");
+ let asset:any;
+ if(contentType.startsWith("image/")){
+  if(req.body.length>15*1024*1024)editorFail("Images must be 15MB or smaller");
+  const bytes=await sharp(req.body,{limitInputPixels:16000000}).rotate().png().toBuffer(),info=await sharp(bytes).metadata();
+  const stored=await uploadImage(bytes,String(req.user._id)+"/editor/"+randomUUID()+".png");
+  asset=await MediaAsset.create({userId:req.user._id,projectId:edit.projectId,provider:"upload",type:"image",...stored,width:info.width,height:info.height,sizeBytes:bytes.length,contentType:"image/png",metadata:{name,licenseConfirmed:true}});
+ }else{
+  const directory=await mkdtemp(path.join(tmpdir(),"drex-upload-"));
+  try{const file=path.join(directory,"source");await writeFile(file,req.body);const info=await probeMedia(file);
+   if(!info.video||!info.duration||info.duration>3600||info.width>7680||info.height>7680)editorFail("Upload a readable video up to one hour and 7680 pixels per side");
+   const stored=await uploadVideo(req.body,String(req.user._id)+"/editor/"+randomUUID(),contentType);
+   asset=await MediaAsset.create({userId:req.user._id,projectId:edit.projectId,provider:"upload",type:"video",...stored,width:info.width,height:info.height,durationSeconds:info.duration,sizeBytes:req.body.length,contentType,metadata:{name,licenseConfirmed:true}});
+  }finally{await rm(directory,{recursive:true,force:true});}
+ }
+ res.status(201).json({asset:publicAsset(asset.toObject())});
 }));

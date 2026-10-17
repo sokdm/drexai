@@ -39,6 +39,7 @@ export async function processVideoExport(id?: string, storage: Storage = { read:
         const scale = clip.fit === "cover" ? Math.max(w / info.width, h / info.height) : Math.min(w / info.width, h / info.height);
         if (scale > 1.01) throw new Error(`Source cannot support selected resolution: ${clip.label}`);
       }
+      for (const overlay of (timeline.overlays || []).filter(o => o.assetId === String(asset._id))) if (overlay.kind === "video" && overlay.sourceIn + overlay.duration > info.duration + .05) throw new Error("Overlay exceeds actual source duration");
       for (const audio of timeline.audio.filter(a => a.assetId === String(asset._id))) if (audio.sourceIn + audio.duration > info.duration + 0.05) throw new Error(`Audio exceeds actual source duration: ${audio.label}`);
     }
     let lastProgress = 0;

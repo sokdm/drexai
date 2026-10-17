@@ -30,7 +30,7 @@ Supported packs:
 
 Users can upload music, product images, logos, overlays and other brand images. Studio can add library images/music to its shared saved edit; Editor uses its existing media/timeline controls. Pending manual edits must be saved before applying a saved pack. Importing an asset alone does not silently add it to a production.
 
-Image overlays/logos can be stored and used as visual clips. Arbitrary compositing over simultaneous video tracks is not implemented here. Pack templates are editing configurations, not motion-graphics projects. Caption presets style existing captions rather than claiming to transcribe speech. Permanent pack deletion and commercial bulk rendering are not added.
+Update: image/video overlay compositing and built-in motion templates are now implemented; see `OVERLAYS_AND_MOTION.md` for controls, export verification and limits. Packs remain renderer-supported configurations rather than arbitrary executable motion-graphics projects. Caption presets style existing captions rather than claiming to transcribe speech. Permanent pack deletion and commercial bulk rendering are not added.
 
 ## Verification
 

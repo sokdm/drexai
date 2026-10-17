@@ -100,7 +100,7 @@ studioRouter.get("/productions/:id/edit", wrap(async (req, res) => {
  const production = await own(req);
  if (!production.timeline?.length) return res.status(409).json({ error: "Complete the production rough cut before editing." });
  const edit = await ensureProductionEdit(production), timeline = edit.timeline;
- const ids = [...timeline.clips.map((c: any) => c.assetId), ...timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
+ const ids = [...timeline.clips.map((c: any) => c.assetId), ...(timeline.overlays || []).map((o: any) => o.assetId), ...timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
  res.json({ edit, assets: await MediaAsset.find({ _id: { $in: ids }, userId: req.user._id, deletedAt: null }).select("type durationSeconds metadata sceneId").lean() });
 }));
 studioRouter.post("/productions/:id/edit-command", wrap(async (req, res) => {

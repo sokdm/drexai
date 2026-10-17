@@ -29,11 +29,15 @@ export const editorAudioSchema = z.object({
   anchorClipId: identifier.optional(),
 });
 export const editorCaptionSchema = z.object({ id: identifier, text: z.string().min(1).max(500), start: seconds, end: seconds, anchorClipId: identifier.optional(), verification: z.enum(["transcript", "unverified_script", "manual"]).optional(), style: captionStyleSchema.default({}) }).refine(c => c.end > c.start, "Caption end must follow start");
+export const editorOverlaySchema = z.object({ id: identifier, assetId, kind: z.enum(["image", "video"]), label: z.string().max(150), start: seconds, sourceIn: seconds.default(0), duration: z.number().min(.1).max(600), x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(.02).max(1), height: z.number().min(.02).max(1), opacity: z.number().min(0).max(1).default(1), rotation: z.number().min(-180).max(180).default(0), animation: z.enum(["none", "fade", "slide-left", "zoom-in"]).default("none") });
 export const timelineSchema = z.object({
+  overlays: z.array(editorOverlaySchema).max(20).optional(),
   clips: z.array(editorClipSchema).max(200), audio: z.array(editorAudioSchema).max(200), captions: z.array(editorCaptionSchema).max(1000),
   aspectRatio: z.enum(["16:9", "9:16", "1:1"]).default("16:9"), musicDecision: z.enum(["pending", "added", "none"]).default("pending"),
 }).superRefine((timeline, ctx) => {
   if (timelineDuration(timeline) > 3600) ctx.addIssue({ code: "custom", message: "Timeline cannot exceed one hour" });
+  if (new Set((timeline.overlays || []).map(o => o.id)).size !== (timeline.overlays || []).length) ctx.addIssue({ code: "custom", message: "Overlay IDs must be unique" });
+  for (const o of timeline.overlays || []) if (o.start + o.duration > timelineDuration(timeline) + .05) ctx.addIssue({ code: "custom", message: "Overlay extends beyond timeline" });
   for (const items of [timeline.clips, timeline.audio, timeline.captions]) if (new Set(items.map(i => i.id)).size !== items.length) ctx.addIssue({ code: "custom", message: "Timeline IDs must be unique" });
   const ids = new Set(timeline.clips.map(c => c.id));
   for (const item of [...timeline.audio, ...timeline.captions]) if (item.anchorClipId && !ids.has(item.anchorClipId)) ctx.addIssue({ code: "custom", message: "Audio or caption references a missing clip" });
@@ -58,5 +62,6 @@ export function splitTimeline(t: EditorTimeline, id: string, localTime: number, 
 }
 export function deleteClips(t: EditorTimeline, ids: string[]): EditorTimeline {
   const remove = new Set(ids);
-  return { ...t, clips: t.clips.filter(c => !remove.has(c.id)), audio: t.audio.filter(a => !a.anchorClipId || !remove.has(a.anchorClipId)), captions: t.captions.filter(a => !a.anchorClipId || !remove.has(a.anchorClipId)) };
+  const end = timelineDuration({clips:t.clips.filter(c => !remove.has(c.id))});
+  return { ...t, ...(t.overlays ? {overlays:t.overlays.filter(o => o.start < end-.1).map(o => ({...o,duration:Math.min(o.duration,end-o.start)}))} : {}), clips: t.clips.filter(c => !remove.has(c.id)), audio: t.audio.filter(a => !a.anchorClipId || !remove.has(a.anchorClipId)), captions: t.captions.filter(a => !a.anchorClipId || !remove.has(a.anchorClipId)) };
 }

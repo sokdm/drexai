@@ -179,3 +179,11 @@ test("portrait and square MP4 exports work without optional music or captions", 
     assert.equal(result.width, 480); assert.equal(result.height, ratio === "1:1" ? 480 : 854); assert.ok(result.audio); assert.ok(Math.abs(result.duration - 0.5) < 0.1);
   }
 });
+
+test("visual upload validates bytes and permission for overlay sources",async()=>{
+ const bytes=await sharp({create:{width:128,height:128,channels:4,background:"#44aa88"}}).png().toBuffer();
+ const options={method:"POST",headers:{"Content-Type":"image/png","x-license-confirmed":"true","x-file-name":"Original logo.png"},body:bytes};
+ const result=await request("/edits/"+edit._id+"/visual",options);assert.equal(result.response.status,201);assert.equal(result.data.asset.type,"image");assert.equal(result.data.asset.metadata.licenseConfirmed,true);
+ const denied=await request("/edits/"+edit._id+"/visual",{...options,headers:{...options.headers,"x-license-confirmed":"false"}});assert.equal(denied.response.status,400);
+ const malformed=await request("/edits/"+edit._id+"/visual",{...options,body:Buffer.from("not an image")});assert.ok(malformed.response.status>=400);
+});

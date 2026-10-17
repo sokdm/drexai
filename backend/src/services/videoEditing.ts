@@ -28,7 +28,7 @@ export function roughCut(production: any): EditorTimeline {
   return timelineSchema.parse({ clips, audio, captions: [], aspectRatio: production.settings?.aspectRatio || "16:9", musicDecision: "pending" });
 }
 export async function validateTimelineAssets(timeline: EditorTimeline, userId: string, settings?: ExportSettings) {
-  const ids = [...new Set([...timeline.clips.map(c => c.assetId), ...timeline.audio.map(a => a.assetId)].filter(Boolean))];
+  const ids = [...new Set([...timeline.clips.map(c => c.assetId), ...(timeline.overlays || []).map(o => o.assetId), ...timeline.audio.map(a => a.assetId)].filter(Boolean))];
   const assets = await MediaAsset.find({ _id: { $in: ids }, userId, deletedAt: null }).lean();
   if (assets.length !== ids.length) editorFail("A timeline asset is missing or belongs to another user", 404);
   const map = new Map(assets.map(a => [String(a._id), a]));
@@ -43,6 +43,11 @@ export async function validateTimelineAssets(timeline: EditorTimeline, userId: s
       const scale = c.fit === "cover" ? Math.max(w / asset.width, h / asset.height) : Math.min(w / asset.width, h / asset.height);
       if (scale > 1.01) editorFail(`Choose a lower resolution for ${c.label}; source upscaling is disabled`);
     }
+  }
+  for (const o of timeline.overlays || []) {
+    const asset = map.get(o.assetId)!;
+    if (asset.type !== o.kind) editorFail("Overlay source type mismatch");
+    if (o.kind === "video" && (!asset.durationSeconds || o.sourceIn + o.duration > asset.durationSeconds + .05)) editorFail("Overlay trim exceeds its source duration");
   }
   for (const a of timeline.audio) {
     const asset = map.get(a.assetId)!;

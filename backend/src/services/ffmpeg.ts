@@ -103,7 +103,21 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
   });
   nativeTracks.forEach((a, i) => graphs.push(`[${a.inputIndex}:a:0]atrim=start=${a.sourceIn}:duration=${a.duration * a.speed},asetpts=PTS-STARTPTS,atempo=${Math.max(.5, Math.min(2, a.speed))}${a.speed < .5 || a.speed > 2 ? `,atempo=${a.speed / Math.max(.5, Math.min(2, a.speed))}` : ""},aresample=48000,volume=${a.volume},adelay=${Math.round(a.start * 1000)}:all=1[n${i}]`));
   graphs.push(`[base]${nativeTracks.map((_, i) => `[n${i}]`).join("")}${tracks.map((_, i) => `[a${i}]`).join("")}amix=inputs=${tracks.length + nativeTracks.length + 1}:duration=first:normalize=0,alimiter=limit=0.95:level=false:latency=true[aout]`);
-  args.push("-filter_complex", graphs.join(";"), "-vf", "ass=captions.ass", "-map", "0:v:0", "-map", "[aout]", "-t", String(total), "-c:v", "libx264", "-preset", "veryfast", "-crf", String({ draft: 28, standard: 23, high: 18 }[settings.quality]), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-progress", "pipe:1", "output.mp4");
+  let visual = "0:v:0";
+  for (const [i, o] of (timeline.overlays || []).entries()) {
+    const file = sources.get(o.assetId); if (!file) throw new Error("Missing overlay source");
+    const input = 2 + tracks.length + nativeTracks.length + i;
+    if (o.kind === "image") args.push("-loop", "1", "-framerate", "30", "-i", file);
+    else args.push("-ss", String(o.sourceIn), "-i", file);
+    const w = Math.max(2,Math.round(width * o.width / 2) * 2), h = Math.max(2,Math.round(height * o.height / 2) * 2);
+    const progress = "min(1,t/0.3)";
+    const scale = o.animation === "zoom-in" ? ",scale=w='" + w + "*(0.7+0.3*" + progress + ")':h='" + h + "*(0.7+0.3*" + progress + ")':eval=frame" : "";
+    graphs.push("[" + input + ":v:0]trim=duration=" + o.duration + ",setpts=PTS-STARTPTS,scale=" + w + ":" + h + ":force_original_aspect_ratio=decrease,format=rgba,pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba" + scale + ",colorchannelmixer=aa=" + o.opacity + (o.rotation ? ",rotate=" + o.rotation + "*PI/180:ow=rotw(iw):oh=roth(ih):c=none" : "") + (o.animation === "fade" ? ",fade=t=in:st=0:d=" + Math.min(.3,o.duration/2) + ":alpha=1,fade=t=out:st=" + Math.max(0,o.duration-.3) + ":d=" + Math.min(.3,o.duration/2) + ":alpha=1" : "") + ",setpts=PTS+" + o.start + "/TB[ov" + i + "]");
+    const x = o.animation === "slide-left" ? "W*" + o.x + "-w/2-W*(1-min(1,(t-" + o.start + ")/0.3))" : "W*" + o.x + "-w/2";
+    graphs.push("[" + visual + "][ov" + i + "]overlay=x='" + x + "':y='H*" + o.y + "-h/2':enable='gte(t," + o.start + ")*lt(t," + (o.start+o.duration) + ")':eof_action=pass:repeatlast=0[v" + i + "]"); visual = "v" + i;
+  }
+  graphs.push("[" + visual + "]ass=captions.ass[vout]");
+  args.push("-filter_complex", graphs.join(";"), "-map", "[vout]", "-map", "[aout]", "-t", String(total), "-c:v", "libx264", "-preset", "veryfast", "-crf", String({ draft: 28, standard: 23, high: 18 }[settings.quality]), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-progress", "pipe:1", "output.mp4");
   await runMedia("ffmpeg", args, { cwd: directory, signal, onProgress: seconds => onProgress(50 + Math.min(1, seconds / total) * 40) });
   const output = path.join(directory, "output.mp4"), info = await probeMedia(output), size = (await stat(output)).size;
   if (!info.video || !info.audio || info.videoCodec !== "h264" || info.audioCodec !== "aac" || info.width !== width || info.height !== height || Math.abs(info.duration - total) > 0.15 || size < 100) throw new Error("Rendered MP4 did not pass stream, duration or resolution checks");

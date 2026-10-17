@@ -3,7 +3,7 @@ import mongoose, { Schema, model } from "mongoose";
 import { z } from "zod";
 import sharp from "sharp";
 import { randomUUID } from "node:crypto";
-import { captionStyleSchema, timelineSchema } from "@drex/shared";
+import { captionStyleSchema, timelineSchema, timelineDuration } from "@drex/shared";
 import { MediaAsset } from "../models/MediaAsset.js";
 import { VideoEdit } from "../models/VideoEdit.js";
 import { AdminAudit } from "../models/Admin.js";
@@ -15,11 +15,12 @@ export const AssetPack = model("AssetPack", new Schema({ name: String, kind: Str
 export const assetPackRouter = Router();
 const wrap = (f: any) => (req: any,res: any,next: any) => Promise.resolve(f(req,res)).catch(next);
 const id = z.string().regex(/^[a-f0-9]{24}$/i), reason = z.string().trim().min(10).max(1000);
-export const packSchema = z.object({ name: z.string().trim().min(2).max(100), kind: z.enum(["music", "brand", "template", "effect", "caption", "transition"]), license: z.string().trim().min(10).max(2000), active: z.boolean(), assetId: id.optional(), preset: z.object({ look: z.enum(["original","cinematic","vivid","monochrome","warm","cool"]).optional(), transition: z.enum(["cut","fade"]).optional(), captionStyle: captionStyleSchema.optional() }).default({}) });
+export const packSchema = z.object({ name: z.string().trim().min(2).max(100), kind: z.enum(["music", "brand", "template", "effect", "caption", "transition"]), license: z.string().trim().min(10).max(2000), active: z.boolean(), assetId: id.optional(), preset: z.object({ motion: z.enum(["gentle-push", "title-reveal"]).optional(), title: z.string().trim().min(1).max(150).optional(), look: z.enum(["original","cinematic","vivid","monochrome","warm","cool"]).optional(), transition: z.enum(["cut","fade"]).optional(), captionStyle: captionStyleSchema.optional() }).default({}) });
 function actor(req: any) { return req.adminUser?._id || req.user._id; }
 function admin(req: any) { if (!req.adminUser) throw Object.assign(new Error("Administrator access required"), { statusCode: 403 }); }
 export function applyPackPreset(timeline: any, preset: any) {
- const next = timelineSchema.parse({ ...timeline, clips: timeline.clips.map((c: any) => ({ ...c, ...(preset.look ? { look: preset.look } : {}), ...(preset.transition ? { transition: preset.transition } : {}) })), captions: timeline.captions.map((c: any) => ({ ...c, ...(preset.captionStyle ? { style: preset.captionStyle } : {}) })) });
+ const motionCaptions = preset.motion === "title-reveal" && timelineDuration(timeline) >= .1 ? [{ id:randomUUID(),text:preset.title || timeline.clips[0]?.label || "",start:0,end:Math.min(3,timelineDuration(timeline)),verification:"manual",style:{font:"Arial",size:48,position:"center",preset:"bold",animation:"pop"} }] : [];
+ const next = timelineSchema.parse({ ...timeline, clips: timeline.clips.map((c: any) => ({ ...c, ...(preset.motion === "gentle-push" ? {keyframes:[{time:0,zoom:1,x:.5,y:.5},{time:c.duration,zoom:1.12,x:.5,y:.5}]} : {}), ...(preset.look ? { look: preset.look } : {}), ...(preset.transition ? { transition: preset.transition } : {}) })), captions: [...timeline.captions.map((c: any) => ({ ...c, ...(preset.captionStyle ? { style: preset.captionStyle } : {}) })),...motionCaptions] });
  if (JSON.stringify(next) === JSON.stringify(timelineSchema.parse(timeline))) throw new Error("This preset would not change the timeline. Add applicable clips or captions first.");
  return next;
 }

@@ -90,3 +90,16 @@ test("editor previews real MP4 playback and reorders clips by drag and drop", as
   await page.getByRole("button", { name: "Select clip 2: Closing still" }).dragTo(page.getByRole("button", { name: "Select clip 1: Opening shot" }));
   await page.getByRole("button", { name: "Save timeline", exact: true }).click(); await expect.poll(() => state.edit.timeline.clips[0].id).toBe("still");
 });
+
+test("image and video overlays share preview, timeline and saved edit",async({page})=>{
+ const state=await editorApi(page);await page.goto("/dashboard/video-editor?editId="+editId);
+ await page.getByRole("button",{name:"Continue without music",exact:true}).click();
+ await page.getByRole("button",{name:"overlays",exact:true}).click();
+ await page.getByRole("button",{name:"Overlay Original clip",exact:true}).click();
+ await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toBeAttached();
+ await expect(page.locator(".editor-caption-track").filter({hasText:"Overlay 1"})).toBeVisible();
+ await page.getByRole("button",{name:"Save timeline",exact:true}).click();
+ await page.reload();await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toBeAttached();
+ await page.getByRole("button",{name:"overlays",exact:true}).click();await page.getByRole("button",{name:"Remove overlay",exact:true}).click();
+ await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toHaveCount(0);
+});

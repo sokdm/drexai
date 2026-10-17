@@ -26,12 +26,14 @@ export function editingCommand(input: EditorTimeline, message: string, captions:
  } else if (/intro/.test(text)) {
   const title = message.match(/["“](.+?)["”]/)?.[1] || "Welcome";
   const seconds = 3; result.clips.unshift({ id: randomUUID(), label: "Intro", kind: "title", sourceIn: 0, duration: seconds, transition: "fade", fit: "contain", text: title.slice(0, 150), textStyle: { font: "Arial", size: 48, position: "center", preset: "bold", animation: "fade" } });
+  result.overlays = result.overlays?.map(o => ({...o,start:o.start+seconds}));
   result.audio = result.audio.map(a => a.anchorClipId ? a : { ...a, start: a.start + seconds }); result.captions = result.captions.map(c => c.anchorClipId ? c : { ...c, start: c.start + seconds, end: c.end + seconds });
   explanation = "Added a three-second title card and shifted unanchored audio and captions.";
  } else if (/short|vertical|9:16/.test(text)) {
   const duration = Math.min(600, Math.max(1, Number(text.match(/(\d+)\s*(?:second|sec|s\b)/)?.[1] || 30))); let remaining = duration;
   result.clips = result.clips.flatMap(clip => { if (remaining < .1) return []; const next = { ...clip, duration: Math.min(clip.duration, remaining), fit: "cover" as const }; remaining -= next.duration; return [next]; });
   const ids = new Set(result.clips.map(c => c.id)), end = timelineDuration(result); result.aspectRatio = "9:16";
+  result.overlays = result.overlays?.filter(o => o.start < end-.1).map(o => ({...o,duration:Math.min(o.duration,end-o.start)}));
   result.audio = result.audio.filter(a => a.anchorClipId ? ids.has(a.anchorClipId) : a.start < end).map(a => ({ ...a, duration: Math.min(a.duration, Math.max(.1, end - (a.anchorClipId ? 0 : a.start))), fadeIn: 0, fadeOut: 0 }));
   result.captions = result.captions.filter(c => c.anchorClipId ? ids.has(c.anchorClipId) : c.start < end).map(c => ({ ...c, end: Math.min(c.end, c.anchorClipId ? c.end : end) }));
   explanation = `Kept the first ${duration} seconds and changed to a vertical cover composition. This command does not detect speakers or rank engaging moments.`;
