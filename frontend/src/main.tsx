@@ -70,6 +70,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="image-to-video" element={<ImageToVideoPage />} />
             <Route path="voice-studio" element={<VoiceStudioPage />} />
             <Route path="credit-wallet" element={<WalletPage />} />
+            <Route path="wallet" element={<Navigate to="/dashboard/credit-wallet" replace />} />
             <Route path="support" element={<SupportPage />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="notifications" element={<NotificationsPage />} />

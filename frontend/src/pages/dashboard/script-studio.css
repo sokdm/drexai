@@ -6,3 +6,19 @@
 .script-log h2 small{white-space:nowrap;flex-shrink:0}.script-studio-grid>.script-setup{scrollbar-width:thin}.script-scene{scroll-margin-top:12px}
 
 .script-image-link{font-size:10px;padding:7px 9px;border:1px solid var(--ss-line);border-radius:6px;color:#9990ef}
+
+/* Keep the assistant and activity panel within the workspace grid row. */
+.script-sidebar{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);height:100%;overflow:hidden}
+.script-assistant{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.script-log{min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.script-log h2{flex-shrink:0;flex-wrap:wrap;row-gap:5px;line-height:1.4;margin-bottom:10px}
+.script-log h2 small{margin-left:auto;white-space:nowrap;padding:3px 7px;border:1px solid var(--ss-line);border-radius:12px}
+.script-log>div[role=log]{min-height:0;flex:1 1 0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable;padding-right:8px}
+.script-log article{min-width:0;margin:10px 0;align-items:flex-start}
+.script-log article>div{min-width:0;flex:1;overflow-wrap:anywhere}
+.script-log p{white-space:normal;line-height:1.6;margin:3px 0}
+.script-log time{display:block}
+.script-log>button{flex:0 0 auto;white-space:normal;line-height:1.5;margin-top:10px}
+.script-log .script-log-latest{min-height:26px;padding:4px 7px;font-size:9px}
+@media(min-width:681px) and (max-width:1100px){.script-sidebar{height:auto;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:360px}.script-log{max-height:none}}
+@media(max-width:680px){.script-sidebar{height:auto;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(240px,auto) 320px;overflow:visible}.script-assistant{max-height:400px}.script-log{min-height:0;max-height:none}}
