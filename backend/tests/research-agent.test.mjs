@@ -31,10 +31,10 @@ before(async () => {
  await PricingOverride.create({ feature: "ai_research_chat", model: "openrouter/google/gemini-3.8-flash", unit: "request", costUsd: ".001", expiresAt: new Date(Date.now() + 3600000) });
  globalThis.fetch = async (url, options) => {
   if (!String(url).startsWith("https://openrouter.ai")) return original(url, options);
-  if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }] });
+  if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }, { id: "fixture/research:free", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], context_length: 64000, pricing: { prompt: "0", completion: "0" } }] });
   if (String(url).endsWith("/key")) return Response.json({ data: { limit_remaining: 100 } });
   assert.ok(String(url).endsWith("chat/completions")); providerCalls++; const body = JSON.parse(options.body);
-  if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: .001 } });
+  if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: body.model.endsWith(":free") ? 0 : .001 } });
   return new Response('data: {"id":"answer-1","choices":[{"delta":{"content":"Original idea. "}}]}\n\ndata: {"choices":[{"delta":{"content":"Review your draft."},"finish_reason":"stop"}],"usage":{"cost":0.001}}\n\ndata: [DONE]\n\n');
  };
  const app = express(); app.use(express.json(), cookieParser()); app.use("/api/ai", researchAgentRouter); app.use(errorHandler); server = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); }); base = `http://127.0.0.1:${server.address().port}/api/ai`;
@@ -75,4 +75,15 @@ test("Director tools require permission and mutate the same saved editor timelin
   assert.ok(await StudioEvent.exists({ productionId: production._id, level: "failure" }));
   assert.ok(await StudioEvent.exists({ productionId: production._id, level: "success" }));
  } finally { plannedTools = []; }
+});
+
+test("free research accepts zero-credit approval, executes tools and preserves the wallet",async()=>{
+ plannedTools=[];
+ const payload={mode:"free",message:"Research a fresh original niche"};
+ const quoted=await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)});
+ const {quote}=await quoted.json();assert.equal(quote.allowed,true);assert.equal(quote.credits,0);assert.equal(quote.model,"openrouter/fixture/research:free");
+ const before=await Wallet.findOne({userId:user._id});
+ const response=await original(base+"/agent/chat",{method:"POST",headers,body:JSON.stringify({...payload,approvedCredits:0})});
+ assert.equal(response.status,200);assert.match(await response.text(),/event: done/);
+ assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
 });

@@ -122,7 +122,7 @@ adminRouter.put("/gateway-binding", wrap(async (req: any, res: any) => {
  if (!isOpenRouter(input.model)) throw new Error("Select a verified OpenRouter model");
  if (kind === "image" && !imageModels.some(m => m.id === input.model) || kind === "video" && !videoModels.some(m => m.id === input.model) || kind === "voice" && !ttsModels.some(m => m.id === input.model)) throw new Error("This model has no supported workspace adapter");
  const record = await verifiedRouterModel(input.model, kind);
- if (kind === "text" && !record.supported_parameters?.includes("response_format")) throw new Error("Structured output support is required for this feature");
+ if (kind === "text" && (!record.supported_parameters?.includes("response_format") || !record.supported_parameters?.includes("max_tokens"))) throw new Error("Structured output and bounded output token support are required for this feature");
  const session = await mongoose.startSession(); try { await session.withTransaction(async () => { const old = await GatewayBinding.findById(input.feature).session(session); await GatewayBinding.updateOne({ _id: input.feature }, { $set: { model: input.model, updatedBy: req.adminUser._id } }, { upsert: true, session }); await audit(req, "gateway-binding", input.feature, input.reason, old?.toObject(), { model: input.model }, session); }); } finally { await session.endSession(); }
  res.json({ ok: true });
 }));

@@ -55,7 +55,7 @@ export async function providerAccountStatus(refresh = false) {
   const [balance, key, activity] = records;
   const { getPricingPolicy } = await import("./creditPricingEngine.js"), policy = await getPricingPolicy();
   if (balance?.values && !balance.error && balance.values.remainingUsd < policy.values.lowBalanceUsd) await adminAlert("openrouter-low-balance", "OpenRouter balance is low", `Provider-reported balance: $${balance.values.remainingUsd.toFixed(4)} USD.`, balance.values.remainingUsd < policy.values.criticalBalanceUsd ? "critical" : "warning");
-  return { managementConfigured: !!env.OPENROUTER_MANAGEMENT_KEY, generationConfigured: !!env.OPENROUTER_API_KEY, balance, key, activity, stale: records.some(r => !r?.syncedAt || !!r.error || Date.now() - new Date(r.syncedAt).getTime() > 300000), instructions: "Account balance/activity need OPENROUTER_MANAGEMENT_KEY. Key-level limits use OPENROUTER_API_KEY. Neither key is sent to the browser." };
+  return { freeAi: await (await import("./freeAiLimits.js")).freeAiStatus(), managementConfigured: !!env.OPENROUTER_MANAGEMENT_KEY, generationConfigured: !!env.OPENROUTER_API_KEY, balance, key, activity, stale: records.some(r => !r?.syncedAt || !!r.error || Date.now() - new Date(r.syncedAt).getTime() > 300000), instructions: "Account balance/activity need OPENROUTER_MANAGEMENT_KEY. Key-level limits use OPENROUTER_API_KEY. Neither key is sent to the browser." };
 }
 export async function checkProviderAffordability(estimate: number) {
   const { getPricingPolicy } = await import("./creditPricingEngine.js"), policy = await getPricingPolicy();

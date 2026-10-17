@@ -8,6 +8,7 @@ import { env } from "../config/env.js";
 
 const pct = z.number().min(0).max(95), usd = z.number().min(0).max(10000);
 export const pricingPolicySchema = z.object({
+  freeUserDailyRequests: z.number().int().min(1).max(1000).default(20), freeSharedDailyRequests: z.number().int().min(1).max(1000).default(50), freeSharedMinuteRequests: z.number().int().min(1).max(20).default(20),
   markup: z.number().min(1).max(100), marginPct: pct, minimumCredits: z.number().int().min(1).max(10000),
   imageMinimumCredits: z.number().int().min(1).max(10000), paymentFeePct: pct, providerFeePct: pct,
   contingencyPct: pct, renderingUsd: usd, storageUsd: usd, otherUsd: usd,
@@ -94,6 +95,21 @@ export async function quoteAutomaticCredits(input: any) {
     if (input.settings?.background) checkCapability(record, "background", input.settings.background);
     input = { ...input, requestedModel: input.model, model };
     estimate = await estimateRouterCost(input, values);
+  }
+  if (estimate.cost.isZero()) {
+    const record = await verifiedRouterModel(input.model, "text");
+    const { verifiedFreeText } = await import("./freeAiLimits.js");
+    if (!verifiedFreeText(record) || input.settings?.multimodal) throw new Error("Zero-cost requests require a verified free text model.");
+    if (!record.supported_parameters?.includes("max_tokens") || !record.supported_parameters.includes("response_format")) throw new Error("Select a compatible free model with structured output and bounded tokens, or approve a paid model.");
+    const freeFallbacks: any[] = [];
+    const catalog = await (await import("./openrouter.js")).routerCatalog("text");
+    for (const candidate of catalog) {
+      if (candidate.id === record.id || !verifiedFreeText(candidate) || !candidate.architecture?.output_modalities?.includes("text") || !candidate.supported_parameters?.includes("max_tokens") || !candidate.supported_parameters?.includes("response_format") || !(candidate.context_length >= estimate.limits.maxInputTokens + estimate.limits.maxOutputTokens)) continue;
+      const model = "openrouter/" + candidate.id;
+      try { await (await import("./platformControl.js")).assertProviderBudget(model, 0); freeFallbacks.push({ model, maxPrice: { prompt: 0, completion: 0, request: 0 } }); } catch { continue; }
+      if (freeFallbacks.length === 2) break;
+    }
+    return { allowed: true, credits: 0, feature: input.feature, provider: "openrouter", model: input.model, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: 0, pricingVersion: policy.revision, pricingSource: estimate.source, requestLimits: { ...estimate.limits, fallbacks: freeFallbacks, approvedCostUsd: 0 }, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
   }
   const requestLimits: any = { ...estimate.limits }, candidates: any[] = [];
   if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt", "full_video_transcription"].includes(input.feature)) {

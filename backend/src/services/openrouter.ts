@@ -84,6 +84,12 @@ async function routerTextAttempt(input: TextInput) {
   if (Number.isFinite(modelOutputLimit) && modelOutputLimit > 0) body.max_tokens = Math.min(body.max_tokens, Math.floor(modelOutputLimit));
   if (input.reasoningEffort && supported.includes("reasoning")) body.reasoning = { effort: input.reasoningEffort };
   if (input.schema) body.response_format = { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: geminiSchema(input.schema) } };
+  const { verifiedFreeText, admitFreeAi } = await import("./freeAiLimits.js");
+  if (verifiedFreeText(record)) {
+    // Exact free model, no paid route substitutions; every retry consumes shared quota.
+    body.provider.allow_fallbacks = false;
+    await admitFreeAi(input.userId);
+  }
   if (input.onDelta) { body.stream = true; body.stream_options = { include_usage: true }; const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId, input.reservationId); return result.text; }
   const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000), data = await response.json();
   await recordRouterUsage(input.model, "text", data, input.userId, input.reservationId);

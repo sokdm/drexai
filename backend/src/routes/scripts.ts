@@ -22,7 +22,7 @@ async function normalize(userId: any, input: any) {
  const count = Math.min(40, project.scenes.length + (add ? add[1].toLowerCase() === "five" ? 5 : Number(add[1]) : 0));
  const longer = /longer/i.test(input.message || "");
  const original = scriptShape(input.settings);
- return { ...input, settings: { ...input.settings, sceneCount: Math.max(3,count), ...(longer ? { targetDuration: Math.min(30, original.seconds / 60 * 1.5) + " minutes" } : {}) } };
+ return { ...input, settings: { ...input.settings, sceneCount: Math.max(1,count), ...(longer ? { targetDuration: Math.min(30, original.seconds / 60 * 1.5) + " minutes" } : {}) } };
 }
 async function terms(input: any) {
  const model = await defaultModel("story_generation", await defaultModel("text", "openrouter/" + env.OPENROUTER_TEXT_MODEL));

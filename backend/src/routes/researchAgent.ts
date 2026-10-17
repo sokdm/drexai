@@ -19,18 +19,29 @@ export const researchAgentRouter = Router();
 researchAgentRouter.use(requireAuth, requireCsrf);
 const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch(next);
 const id = z.string().regex(/^[a-f\d]{24}$/i);
-const inputSchema = z.object({ message: z.string().trim().min(2).max(6000), conversationId: id.optional(), productionId: id.optional(), allowTimelineEdits: z.boolean().default(false), draftProject: z.boolean().default(false) });
+const inputSchema = z.object({ mode: z.enum(["configured", "free", "paid"]).default("configured"), message: z.string().trim().min(2).max(6000), conversationId: id.optional(), productionId: id.optional(), allowTimelineEdits: z.boolean().default(false), draftProject: z.boolean().default(false) });
 const planSchema = z.object({ tools: z.array(z.object({ name: z.enum(["search_videos", "lookup_channel", "inspect_production", "list_assets", "edit_timeline"]), query: z.string().min(1).max(150) })).max(2) });
 researchAgentRouter.get("/agent/conversations", wrap(async (req: any, res: any) => res.json({ conversations: await AIConversation.find({ userId: req.user._id }).select("title updatedAt projectId").sort({ updatedAt: -1 }).limit(50) })));
 researchAgentRouter.get("/agent/conversations/:id", wrap(async (req: any, res: any) => { const conversation = await AIConversation.findOne({ _id: id.parse(req.params.id), userId: req.user._id }); if (!conversation) return res.status(404).json({ error: "Conversation not found" }); res.json({ conversation }); }));
 async function price(input: any) {
- const model = await defaultModel("ai_research_chat", await defaultModel("text", env.GEMINI_MODEL));
+ let model = await defaultModel("ai_research_chat", await defaultModel("text", env.GEMINI_MODEL));
+ if (input.mode === "paid") model = "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
+ if (input.mode === "free") {
+  const { routerCatalog } = await import("../services/openrouter.js"), { verifiedFreeText } = await import("../services/freeAiLimits.js");
+  const { values } = await (await import("../services/creditPricingEngine.js")).getPricingPolicy();
+  const candidates = (await routerCatalog("text")).filter((r: any) => verifiedFreeText(r) && r.architecture?.output_modalities?.includes("text") && r.supported_parameters?.includes("response_format") && r.supported_parameters?.includes("max_tokens") && r.context_length >= values.maxInputTokens + values.maxOutputTokens);
+  candidates.sort((a: any,b: any) => Number("openrouter/" + b.id === model) - Number("openrouter/" + a.id === model));
+  let selected: string | undefined;
+  for (const r of candidates) { const candidate = "openrouter/" + r.id; try { await (await import("../services/platformControl.js")).assertProviderBudget(candidate, 0); selected = candidate; break; } catch {} }
+  if (!selected) throw new Error("No compatible verified free model is available. Select credit-priced continuation to review an approved paid quote.");
+  model = selected;
+ }
  if (!isOpenRouter(model)) throw new Error("Choose an OpenRouter text model for Research chat in Admin / Providers to enable the streaming research agent. Existing direct chat is preserved.");
  return createQuote({ feature: "ai_research_chat", model, provider: providerFor(model), quantity: input.draftProject ? 3 : 2 });
 }
 researchAgentRouter.post("/agent/quote", wrap(async (req: any, res: any) => { const input = inputSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, input, await price(input)) }); }));
 researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
- const input = inputSchema.parse(req.body), approvedCredits = z.number().int().positive().parse(req.body.approvedCredits);
+ const input = inputSchema.parse(req.body), approvedCredits = z.number().int().nonnegative().parse(req.body.approvedCredits);
  let conversation: any, reservation: any, heartbeat: ReturnType<typeof setInterval> | undefined;
  const send = (event: string, data: any) => { if (!res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
  try {

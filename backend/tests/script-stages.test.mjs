@@ -80,3 +80,14 @@ test("short scenes are expanded once within the original approved ceiling withou
  const saved=await ScriptJob.findById(j._id),p=await AIProject.findById(saved.projectId);
  assert.equal(saved.status,"completed");assert.equal(calls,17);assert.equal(p.prompts.durationEstimate.needsReview,false);assert.equal(p.scenes.length,16);assert.equal(saved.logs.filter(l=>l.stage==="expanding").length,8);assert.equal(String(saved.reservationId),String(j.reservationId));assert.equal(saved.pendingBatch,undefined);
 });
+
+test("one-second scripts retain one scene and complete through the durable worker",async()=>{
+ const shortSettings={...settings,targetDuration:"1 second"};
+ assert.deepEqual(scriptShape(shortSettings),{seconds:1,scenes:1,calls:2});
+ const j=await job({input:{settings:shortSettings}});let calls=0;
+ await processScriptJob(j,async input=>{calls++;if(calls===1)return JSON.stringify({title:"A Spark",storyConcept:"A discovery",summary:"A light appears",characters:[],scenes:[{title:"Spark",purpose:"Reveal",duration:1}]});
+ const data=JSON.parse(input.prompt);assert.equal(data.secondsPerScene,1);assert.deepEqual(data.requiredSceneKeys,["scene_1"]);
+ return JSON.stringify({scene_1:{...scene(1),narration:"Light awakens."}});});
+ const saved=await ScriptJob.findById(j._id),project=await AIProject.findById(saved.projectId);
+ assert.equal(saved.status,"completed");assert.equal(calls,2);assert.equal(project.scenes.length,1);assert.equal(project.targetDuration,"1 second");assert.equal(project.scenes[0].estimatedDurationSeconds,1);assert.equal(project.prompts.durationEstimate.needsReview,false);
+});
