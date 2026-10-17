@@ -3,6 +3,7 @@ import { Schema, model } from "mongoose";
 const imageGenerationJobSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
   projectId: { type: Schema.Types.ObjectId, ref: "AIProject" },
+  sceneId: String,
   reservationId: { type: Schema.Types.ObjectId, ref: "CreditReservation" },
   prompt: { type: String, required: true },
   stylePreset: String,

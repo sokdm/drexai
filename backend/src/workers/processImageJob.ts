@@ -20,7 +20,7 @@ export async function processImageJob(jobId: string) {
       const output = outputs[index];
       const key = `${job.userId}/images/${job._id}-${index}.${output.contentType === "image/jpeg" ? "jpg" : "png"}`;
       const stored = await uploadImage(output.buffer, key, output.contentType);
-      assets.push(await MediaAsset.create({ userId: job.userId, projectId: job.projectId, jobId: job._id, prompt: job.prompt, provider: job.provider, model: job.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, metadata: { tool: job.tool || "generate", sourceAssetIds: job.sourceAssetIds, stylePreset: job.stylePreset, aspectRatio: job.aspectRatio, resolution: job.resolution } }));
+      assets.push(await MediaAsset.create({ userId: job.userId, projectId: job.projectId, sceneId: job.sceneId, jobId: job._id, prompt: job.prompt, provider: job.provider, model: job.model, key: stored.key, bucket: stored.bucket, url: stored.url, contentType: output.contentType, sizeBytes: output.buffer.length, metadata: { tool: job.tool || "generate", sourceAssetIds: job.sourceAssetIds, stylePreset: job.stylePreset, aspectRatio: job.aspectRatio, resolution: job.resolution } }));
     }
     job.status = "completed";
     job.outputMetadata = { assetIds: assets.map((asset) => asset._id), count: assets.length };

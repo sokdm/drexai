@@ -15,7 +15,7 @@ const id = z.string().regex(/^[a-f0-9]{24}$/i);
 imageStudioRouter.use("/studio", rateLimit({ windowMs: 60000, limit: 40 }));
 imageStudioRouter.get("/studio/state", wrap(async (req: any, res: any) => res.json({ state: (await ImageStudio.findOne({ userId: req.user._id }))?.state || {}, projects: await AIProject.find({ userId: req.user._id }).select("title").sort({ updatedAt: -1 }).limit(100) })));
 imageStudioRouter.put("/studio/state", wrap(async (req: any, res: any) => {
- const state = z.object({ tool: z.string().max(30), prompt: z.string().max(4000), model: z.string().max(150), stylePreset: z.string().max(80), aspectRatio: z.string().max(10), resolution: z.string().max(10), numberOfImages: z.number().int().min(1).max(10), projectId: id.optional(), selectedId: z.string().max(24), past: z.array(id).max(100).default([]), future: z.array(id).max(100).default([]), sourceAssetIds: z.array(id).max(4), characterReferenceIds: z.array(id).max(4) }).parse(req.body);
+ const state = z.object({ tool: z.string().max(30), prompt: z.string().max(4000), model: z.string().max(150), stylePreset: z.string().max(80), aspectRatio: z.string().max(10), resolution: z.string().max(10), numberOfImages: z.number().int().min(1).max(10), projectId: id.optional(), sceneId: id.optional(), selectedId: z.string().max(24), past: z.array(id).max(100).default([]), future: z.array(id).max(100).default([]), sourceAssetIds: z.array(id).max(4), characterReferenceIds: z.array(id).max(4) }).parse(req.body);
  await ImageStudio.updateOne({ userId: req.user._id }, { state }, { upsert: true }); res.json({ ok: true });
 }));
 imageStudioRouter.get("/studio/capabilities", wrap(async (req: any, res: any) => {

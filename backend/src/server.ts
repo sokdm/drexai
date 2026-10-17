@@ -1,3 +1,4 @@
+import { startScriptWorker } from "./services/scriptProduction.js";
 import { startMongoGenerationFallback } from "./services/generationDispatch.js";
 import { WebsiteSettings } from "./models/Finance.js";
 import { startProviderMonitor } from "./services/openrouterManagement.js";
@@ -83,4 +84,5 @@ await seedCreditConfig().catch((error) => console.warn("Credit config seeding sk
 startNotificationWorker();
 startProviderMonitor();
 startMongoGenerationFallback();
+startScriptWorker();
 httpServer.listen(env.PORT, () => console.log(`Drex API listening on ${env.PORT}`));

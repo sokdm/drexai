@@ -5,6 +5,7 @@ import { readMediaObject } from "./mediaStorage.js";
 import { verifiedRouterModel, checkCapability, isOpenRouter } from "./openrouter.js";
 export async function imageReferences(userId: any, settings: any, bytes = false) {
   if (settings.projectId && !await AIProject.exists({ _id: settings.projectId, userId })) throw new Error("Project not found");
+  if (settings.sceneId && (!settings.projectId || !await AIProject.exists({ _id: settings.projectId, userId, "scenes._id": settings.sceneId }))) throw new Error("Scene does not belong to this project");
   if (["editor", "variations", "product", "style", "background"].includes(settings.tool) && !settings.sourceAssetIds?.length) throw new Error("Select a source image for this tool");
   if (settings.background) {
     if (!isOpenRouter(settings.model)) throw new Error("Transparent background removal requires a verified OpenRouter model");

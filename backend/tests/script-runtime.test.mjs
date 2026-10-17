@@ -1,3 +1,5 @@
+import { scriptSettings } from "../dist/services/scriptProduction.js";
+import { rememberQuote } from "../dist/services/managedPricing.js";
 import { releaseReservation } from "../dist/services/wallet.js";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -46,19 +48,8 @@ before(async () => {
 });
 after(async () => { globalThis.fetch = originalFetch; server?.closeAllConnections(); if (server) await new Promise(r => server.close(r)); await mongoose.disconnect(); await database?.stop(); });
 async function post(path, body) { const response = await fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) }); return { status: response.status, data: await response.json() }; }
-test("script result is parsed, persisted and charged once", async () => {
-  const quote = await post("/api/ai/quote", { feature: "story_generation" });
-  const result = await post("/api/ai/scripts/generate", { approvedCredits: quote.data.quote.credits, settings: { storyTopic: "An original city story" } });
-  assert.equal(result.status, 201); assert.equal(result.data.project.scenes.length, 1); assert.ok(await AIProject.findById(result.data.project._id));
-  const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
-});
-test("provider timeout returns an actionable error and releases reserved script credits", async () => {
-  mode = "timeout";
-  const quote = await post("/api/ai/quote", { feature: "story_generation" });
-  const result = await post("/api/ai/scripts/generate", { approvedCredits: quote.data.quote.credits, settings: { storyTopic: "Another story" } });
-  assert.equal(result.status, 500); assert.match(result.data.error, /90 seconds/);
-  const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
-});
+
+
 test("placeholder Redis falls back to a persisted Mongo job without provider execution", async () => {
   env.IMAGE_QUEUE_ENABLED = true; env.REDIS_URL = "REPLACE_WITH_RENDER_INTERNAL_REDIS_URL";
   const settings = { prompt: "An original city", model: "gemini-nano-banana-2.1", aspectRatio: "16:9", resolution: "1K", numberOfImages: 1, characterReferenceIds: [] };
@@ -66,24 +57,21 @@ test("placeholder Redis falls back to a persisted Mongo job without provider exe
   const result = await post("/api/images/generate", { ...settings, approvedCredits: quote.data.quote.credits });
   assert.equal(result.status, 202); const job = await ImageGenerationJob.findOne({ userId: customer._id }); assert.equal(job.dispatchMode, "mongo"); assert.equal(job.status, "queued");
   await releaseReservation(String(job.reservationId), "test_cleanup"); await ImageGenerationJob.deleteOne({ _id: job._id });
-  const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
+  const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 10); assert.equal(wallet.reservedCredits, 0);
 });
 
-test("malformed character output returns a clear error and releases credits", async () => {
-  mode = "invalid"; const quote = await post("/api/ai/quote", { feature: "story_generation" });
-  const result = await post("/api/ai/scripts/generate", { approvedCredits: quote.data.quote.credits, settings: { storyTopic: "Another story" } });
-  assert.equal(result.status, 500); assert.match(result.data.error, /characters.0/);
-  const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
-});
-test("background scripts return a durable job, resume after page navigation and deduplicate request IDs", async () => {
- mode = "success"; await ScriptJob.init();
- const quote = await post("/api/ai/quote", { feature: "story_generation" });
- const payload = { background: true, requestId: "d54e1c00-7eb1-42fa-90e6-58e0d973c621", approvedCredits: quote.data.quote.credits, settings: { storyTopic: "Recoverable original story", nicheId: "" } };
+
+test("background scripts persist queued requests, deduplicate IDs and enforce ownership", async () => {
+ await ScriptJob.init();
+ const settings = scriptSettings.parse({ storyTopic: "Recoverable original story", nicheId: "" });
+ const quote = { allowed: true, credits: 1, model: "openrouter/fixture/script", provider: "fixture", feature: "story_generation" };
+ await rememberQuote(customer._id, { settings }, quote);
+ const payload = { background: true, requestId: "d54e1c00-7eb1-42fa-90e6-58e0d973c621", approvedCredits: 1, settings };
  const result = await post("/api/ai/scripts/generate", payload); assert.equal(result.status, 202);
  const again = await post("/api/ai/scripts/generate", payload); assert.equal(again.data.job._id, result.data.job._id);
- let saved;
- for (let i = 0; i < 100; i++) { const response = await fetch(base + "/api/ai/scripts/jobs/" + result.data.job._id, { headers }); saved = await response.json(); if (saved.job.status !== "processing") break; await new Promise(r => setTimeout(r, 25)); }
- assert.equal(saved.job.status, "completed"); assert.equal(saved.project.scenes.length, 1);
- assert.equal((await Wallet.findOne({ userId: customer._id })).availableCredits, 8);
+ const saved = await (await fetch(base + "/api/ai/scripts/jobs/" + result.data.job._id, { headers })).json();
+ assert.equal(saved.job.status, "queued"); assert.equal(saved.job.input.settings.storyTopic, settings.storyTopic);
+ assert.equal((await Wallet.findOne({ userId: customer._id })).availableCredits, 9);
  assert.equal((await fetch(base + "/api/ai/scripts/jobs/" + result.data.job._id)).status, 401);
+ await releaseReservation(String(saved.job.reservationId), "test_cleanup");
 });

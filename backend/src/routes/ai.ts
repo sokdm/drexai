@@ -1,3 +1,4 @@
+import { scriptsRouter } from "./scripts.js";
 import { researchAgentRouter } from "./researchAgent.js";
 import { ScriptJob } from "../models/ScriptJob.js";
 import { providerFor } from "../services/openrouter.js";
@@ -19,9 +20,10 @@ import { createQuote, releaseReservation, reserveCredits, settleReservation } fr
 import { randomToken } from "../utils/crypto.js";
 
 export const aiRouter = Router();
-const limiter = rateLimit({ windowMs: 60 * 1000, limit: 15, standardHeaders: true, legacyHeaders: false });
+const limiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
 aiRouter.use(requireAuth, requireCsrf, limiter);
 aiRouter.use(researchAgentRouter);
+aiRouter.use(scriptsRouter);
 
 async function quoteOrReject(feature: string, approvedCredits?: number, userId?: any) {
   const quote = await approvedTerms(userId, { feature }, approvedCredits!, async () => createQuote({ feature, provider: providerFor(await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL))), model: await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL)), quantity: 1 }));
@@ -122,84 +124,6 @@ aiRouter.post("/niches/:id/select", async (req, res) => {
 aiRouter.get("/projects", async (req, res) => res.json({ projects: await AIProject.find({ userId: req.user._id }).sort({ updatedAt: -1 }) }));
 aiRouter.get("/projects/:id", async (req, res) => res.json({ project: await AIProject.findOne({ _id: req.params.id, userId: req.user._id }) }));
 
-aiRouter.post("/scripts/generate", async (req, res, next) => {
-  let reservation: any;
-  let job: any;
-  try {
-    if (req.body.background === true) {
-      const requestId = z.string().uuid().parse(req.body.requestId);
-      const existing = await ScriptJob.findOne({ userId: req.user._id, requestId });
-      if (existing) return res.status(202).json({ job: existing });
-      try { job = await ScriptJob.create({ userId: req.user._id, requestId }); }
-      catch (error: any) { if (error.code !== 11000) throw error; return res.status(202).json({ job: await ScriptJob.findOne({ userId: req.user._id, requestId }) }); }
-    }
-    const input = z.object({
-      approvedCredits: z.number(),
-      settings: z.object({
-        storyTopic: z.string().trim().min(2).max(6000), nicheId: z.preprocess(v => v === "" ? undefined : v, z.string().regex(/^[a-f0-9]{24}$/i).optional()), genre: z.string().optional(), language: z.string().default("English"),
-        targetDuration: z.string().optional(), numberOfCharacters: z.number().optional(), visualStyle: z.string().optional(),
-        dialoguePreference: z.string().optional(), audience: z.string().optional(), tone: z.string().optional(), type: z.string().optional()
-      })
-    }).parse(req.body);
-    const quote = await quoteOrReject("story_generation", input.approvedCredits, req.user._id);
-    reservation = await reserveCredits(String(req.user._id), quote, `story:${randomToken(8)}`);
-    if (job) await ScriptJob.updateOne({ _id: job._id }, { reservationId: reservation._id });
-    const execute = async () => {
-    const niche = input.settings.nicheId ? await Niche.findOne({ _id: input.settings.nicheId, userId: req.user._id }) : null;
-    const generated = await geminiJson({
-      model: quote.model, userId: String(req.user._id), reservationId: String(reservation._id), requestLimits: (quote as any).requestLimits, maxOutputTokens: 12000,
-      schema: scriptProjectSchema,
-      system: "Create original, structured YouTube scripts. Return a JSON object with title, storyConcept, summary, characters (array) and scenes (array). Each scene must include order (number), title, sceneDescription, characters (string array), narration, dialogue, imagePrompt, videoMotionPrompt, cameraDirection, estimatedNarrationTiming, audioSuggestions and transitionSuggestions. Keep the existing string fields for compatibility. Also include dialogueLines as an ordered array of objects {speaker, text, language, accent, emotion, delivery}, dialogueLanguage, preferredAccent, emotionAndDelivery, characterActions, cameraPosition, cameraMovements, environmentalSounds, soundEffects, backgroundAmbience, estimatedDurationSeconds (number), visibleSpeakingCharacters (boolean), offscreenNarration (boolean). Identify every speaker and quote exact intended speech. Each dialogue scene must fit an eight-second Veo native audiovisual clip, at most 14 spoken words; divide longer conversations into sequential scenes. Do not put the same speech in narration and dialogue. Set offscreenNarration true only for a separate narrator. Voice preferences are descriptive guidance, never guaranteed cloning. Keep the result to at most 12 practical scenes. Keep content appropriate for a general audience.",
-      prompt: `Generate a structured project with scene-level prompts. Settings: ${JSON.stringify(input.settings)}\nNiche: ${JSON.stringify(niche)}`
-    });
-    const project = await AIProject.create({
-      userId: req.user._id,
-      nicheId: input.settings.nicheId,
-      title: generated.title,
-      storyConcept: generated.storyConcept,
-      summary: generated.summary,
-      type: input.settings.type,
-      language: input.settings.language,
-      targetDuration: input.settings.targetDuration,
-      visualStyle: input.settings.visualStyle,
-      selectedVisualStyle: input.settings.visualStyle,
-      scenes: generated.scenes,
-      prompts: { sourceSettings: input.settings }
-    });
-    for (const character of generated.characters ?? []) await CharacterProfile.create({ userId: req.user._id, projectId: project._id, ...character });
-    const settled = await settleReservation(String(reservation._id));
-    await AIUsage.create({ userId: req.user._id, model: quote.model, provider: providerFor(quote.model), feature: "story_generation", creditsQuoted: quote.credits, creditsCharged: settled?.credits ?? quote.credits, metadata: { projectId: project._id } });
-    if (job) await ScriptJob.updateOne({ _id: job._id }, { status: "completed", projectId: project._id });
-    return project;
-    };
-    if (job) {
-      res.status(202).json({ job });
-      void execute().catch(async (error: any) => {
-        await ScriptJob.updateOne({ _id: job._id }, { status: "failed", error: error.message || "Script generation failed" });
-        await releaseReservation(String(reservation._id), "story_failed").catch(() => null);
-      }).catch(() => console.warn("Script request reconciliation needs review"));
-      return;
-    }
-    res.status(201).json({ project: await execute() });
-  } catch (error) {
-    if (job) await ScriptJob.updateOne({ _id: job._id }, { status: "failed", error: error instanceof Error ? error.message : "Script generation failed" });
-    if (reservation?._id) await releaseReservation(String(reservation._id), "story_failed").catch(() => null);
-    next(error);
-  }
-});
-aiRouter.get("/scripts/jobs/:id", async (req, res, next) => {
- try {
-  const id = z.string().regex(/^[a-f\d]{24}$/i).parse(req.params.id);
-  let job: any = await ScriptJob.findOne({ _id: id, userId: req.user._id });
-  if (!job) return res.status(404).json({ error: "Script request not found" });
-  if (job.status === "processing" && Date.now() - job.createdAt.getTime() > 180000) {
-   await ScriptJob.updateOne({ _id: id, status: "processing" }, { status: "needs_review", error: "This request was interrupted or timed out. Check saved Projects before starting another billable request. No automatic resubmission was made." });
-   job = await ScriptJob.findById(id);
-  }
-  res.json({ job, project: job.status === "completed" ? await AIProject.findOne({ _id: job.projectId, userId: req.user._id }) : null });
- } catch (error) { next(error); }
-});
-
 aiRouter.patch("/projects/:id/scenes", async (req, res) => {
   const project = await AIProject.findOne({ _id: req.params.id, userId: req.user._id });
   if (!project) return res.status(404).json({ error: "Project not found" });
@@ -208,6 +132,8 @@ aiRouter.patch("/projects/:id/scenes", async (req, res) => {
   const scenes = validated.data;
   project.versions.push({ label: `Version ${project.versions.length + 1}`, scenes: project.scenes });
   project.scenes = scenes as any;
+  if (typeof req.body.title === "string") project.title = req.body.title.slice(0, 200);
+  if (typeof req.body.summary === "string") project.summary = req.body.summary.slice(0, 10000);
   project.approvedAt = undefined;
   project.aiStudioReadyAt = undefined;
   project.scenes.forEach(scene => { scene.approved = false; });

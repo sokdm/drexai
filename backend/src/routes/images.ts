@@ -34,6 +34,7 @@ const requestSchema = z.object({
   numberOfImages: z.number().int().min(1).max(10),
   characterReferenceIds: z.array(z.string().regex(/^[a-f0-9]{24}$/i)).max(4).default([]),
   projectId: z.string().regex(/^[a-f0-9]{24}$/i).optional(),
+  sceneId: z.string().regex(/^[a-f0-9]{24}$/i).optional(),
   sourceAssetIds: z.array(z.string().regex(/^[a-f0-9]{24}$/i)).max(4).default([]),
   tool: z.enum(["generate", "editor", "characters", "variations", "product", "thumbnail", "batch", "style", "background"]).default("generate"),
   background: z.literal("transparent").optional(),

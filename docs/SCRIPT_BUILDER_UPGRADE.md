@@ -1,0 +1,34 @@
+## Script Builder correction
+
+The existing `/dashboard/script-builder` page is upgraded, not duplicated. It uses compact navy/purple panels with light-theme support: story setup, four document tabs, a script revision assistant, actual persisted generation logs, and a draggable scene timeline. The existing live wallet balance remains beside notifications.
+
+### Verified code causes of the old timeout
+
+- Both the direct text adapter and OpenRouter text adapter had a 90-second request abort.
+- The previous background route launched an unawaited promise inside the web process. A stored job ID did not make execution durable across process termination.
+- The whole narrative was requested in one response, capped at twelve scenes, with provider-specific eight-second dialogue restrictions. That encouraged short output and made long stories a large single request.
+- The old status route classified any processing request older than three minutes as interrupted, regardless of actual saved progress.
+
+No Render platform timeout was independently observed. These are verified source-code findings, not a claim about live provider latency or Render logs.
+
+### Execution and recovery
+
+The new authenticated script endpoints require an OpenRouter model selected through existing admin routing. A quote covers planning plus every two-scene writing batch. The worker uses MongoDB durable inputs, plan, cursor, leases, partial projects and timestamped logs. The web service starts a single local script consumer; MongoDB atomic claims coordinate multiple web instances. No new environment key is necessary. This is a Mongo-backed worker loop in the web service, not a newly deployed Redis script worker.
+
+The eight-minute default targets sixteen scenes and 480 seconds. Each writing batch requests developed narration/dialogue and complete prompts. Short or malformed batches fail visibly rather than being reported as a completed long script. Speech word-count validation is an estimate; actual duration depends on delivery and must be reviewed.
+
+Script provider calls have an explicit 180-second limit and a bounded 5,000-token output per batch. HTTP polling does not wait on them. Checkpointed work can continue after restart. If a process dies during a provider call or a timeout is ambiguous, the job moves to `needs_review` and preserves partial scenes and its reservation. It is not automatically resubmitted or declared refunded. Only explicit 429/503 pre-generation rejections are retried once. Invalid/failing stages release the reservation through the existing workflow. Previously consumed provider costs remain in gateway usage records. Completed jobs settle once; repeated request IDs return the existing job.
+
+### Editing and integration
+
+Manual scene editing, adding, deleting, reordering, version save/restore and JSON export are free. Approved continuation uses existing AI Studio routes and stored scene/character data. The revision assistant submits real background writing jobs, checks for concurrent project edits, updates the existing project and retains previous scenes in versions. Recognized targeted rewrites preserve other scenes and scene IDs; dialogue-naturalization and image-prompt requests update their respective fields. Adding scenes preserves prior scenes. Other narrative revisions may rewrite multiple scenes and require review.
+
+Revisions currently generate a complete candidate in bounded stages even when only a subset is applied. Their quote reflects that work; this is a cost/latency limitation, not a claim of cheap single-scene inference. Agent request/outcome conversations are stored in the existing AIConversation collection and previous revision history can be opened with the project.
+
+No image/video provider is invoked by script generation. Timeline cards start with honest placeholders. Real project assets are looked up by scene ID and refreshed periodically. Optional scene-image links pass the saved project/scene IDs and prompt into existing Image Studio; its backend validates ownership and persists scene associations. Image generation requires its own cost approval.
+
+### Verification and remaining limits
+
+Tests use isolated MongoDB, mocked providers and real browser layout checks; no paid OpenRouter calls are made. They cover sixteen-scene staged writing, partial progress on timeout, checkpoint recovery, targeted project revision/version/ID preservation, request deduplication, authentication, manual save, tabs, quote approval, logs and responsive layouts.
+
+Provider quality and latency, live Render restart behavior and real paid duration matching are not verified. Ambiguous provider work needs administrative reconciliation before retry/refund. The consumer has no separate Render process and does not expose a self-service retry of ambiguous paid submissions. Existing production media costs remain separately approved. No direct-provider credentials are removed because other tools may still use them.
