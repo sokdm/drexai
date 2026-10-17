@@ -20,22 +20,22 @@ export const researchAgentRouter = Router();
 researchAgentRouter.use(requireAuth, requireCsrf);
 const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch(next);
 const id = z.string().regex(/^[a-f\d]{24}$/i);
-const inputSchema = z.object({ mode: z.enum(["configured", "free", "paid"]).default("configured"), message: z.string().trim().min(2).max(6000), conversationId: id.optional(), productionId: id.optional(), allowTimelineEdits: z.boolean().default(false), draftProject: z.boolean().default(false) });
+const inputSchema = z.object({ mode: z.enum(["auto", "configured", "free", "paid"]).default("configured"), message: z.string().trim().min(2).max(6000), conversationId: id.optional(), productionId: id.optional(), allowTimelineEdits: z.boolean().default(false), draftProject: z.boolean().default(false) });
 const planSchema = z.object({ tools: z.array(z.object({ name: z.enum(["search_videos", "lookup_channel", "inspect_production", "list_assets", "list_asset_packs", "apply_asset_pack", "edit_timeline"]), query: z.string().min(1).max(150) })).max(2) });
 researchAgentRouter.get("/agent/conversations", wrap(async (req: any, res: any) => res.json({ conversations: await AIConversation.find({ userId: req.user._id }).select("title updatedAt projectId").sort({ updatedAt: -1 }).limit(50) })));
 researchAgentRouter.get("/agent/conversations/:id", wrap(async (req: any, res: any) => { const conversation = await AIConversation.findOne({ _id: id.parse(req.params.id), userId: req.user._id }); if (!conversation) return res.status(404).json({ error: "Conversation not found" }); res.json({ conversation }); }));
-async function price(input: any) {
- const model = await (await import("../services/assistantRouting.js")).assistantModel("ai_research_chat", input.mode);
+async function price(input: any, userId?: string) {
+ const model = await (await import("../services/assistantRouting.js")).assistantModel("ai_research_chat", input.mode, userId, input.draftProject ? 3 : 2);
  if (!isOpenRouter(model)) throw new Error("Choose an OpenRouter text model for Research chat in Admin / Providers to enable the streaming research agent. Existing direct chat is preserved.");
  return createQuote({ feature: "ai_research_chat", model, provider: providerFor(model), quantity: input.draftProject ? 3 : 2 });
 }
-researchAgentRouter.post("/agent/quote", wrap(async (req: any, res: any) => { const input = inputSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, input, await price(input)) }); }));
+researchAgentRouter.post("/agent/quote", wrap(async (req: any, res: any) => { const input = inputSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, input, await price(input, String(req.user._id))) }); }));
 researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
  const input = inputSchema.parse(req.body), approvedCredits = z.number().int().nonnegative().parse(req.body.approvedCredits);
  let conversation: any, reservation: any, heartbeat: ReturnType<typeof setInterval> | undefined;
  const send = (event: string, data: any) => { if (!res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
  try {
-  const terms = await approvedTerms(req.user._id, input, approvedCredits, () => price(input));
+  const terms = await approvedTerms(req.user._id, input, approvedCredits, () => price(input, String(req.user._id)));
   if (!terms.allowed || terms.credits !== approvedCredits) throw new Error("Review the current cost before starting research");
   if (input.conversationId) conversation = await AIConversation.findOneAndUpdate({ _id: input.conversationId, userId: req.user._id, $or: [{ activeUntil: null }, { activeUntil: { $lt: new Date() } }] }, { $set: { activeUntil: new Date(Date.now() + 600000) } }, { new: true });
   else conversation = await AIConversation.create({ userId: req.user._id, title: input.message.slice(0, 70), activeUntil: new Date(Date.now() + 600000), messages: [] });

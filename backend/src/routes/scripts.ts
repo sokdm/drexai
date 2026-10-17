@@ -31,18 +31,18 @@ async function normalize(userId: any, input: any) {
  const original = scriptShape(input.settings);
  return { ...input, settings: { ...input.settings, sceneCount: Math.max(1,count), ...(longer ? { targetDuration: Math.min(30, original.seconds / 60 * 1.5) + " minutes" } : {}) } };
 }
-async function terms(input: any) {
- const model = await (await import("../services/assistantRouting.js")).assistantModel("story_generation", input.settings.modelMode);
+async function terms(input: any, userId?: string) {
+ const model = await (await import("../services/assistantRouting.js")).assistantModel("story_generation", input.settings.modelMode, userId, scriptShape(input.settings).calls);
  if (!model.startsWith("openrouter/")) throw new Error("Select an OpenRouter model for Story generation in Admin / Providers. Script Builder no longer submits direct-provider requests.");
  return createQuote({ feature: "story_generation", provider: "openrouter", model, quantity: scriptShape(input.settings).calls });
 }
-scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); res.json({ quote: await rememberQuote(req.user._id, input, await terms(input)), stages: scriptShape(input.settings) }); }));
+scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); res.json({ quote: await rememberQuote(req.user._id, input, await terms(input, String(req.user._id))), stages: scriptShape(input.settings) }); }));
 scriptsRouter.post("/scripts/generate", wrap(async (req: any, res: any) => {
  const requestId = z.string().uuid().parse(req.body.requestId), input = await normalize(req.user._id, inputSchema.parse(req.body));
  const prior = await ScriptJob.findOne({ userId: req.user._id, requestId }); if (prior) return res.status(202).json({ job: prior });
  const snapshot = input.projectId ? await AIProject.findOne({ _id: input.projectId, userId: req.user._id }) : null;
  if (input.projectId && !snapshot) return res.status(404).json({ error: "Project not found" });
- const approvedCredits = z.number().nonnegative().parse(req.body.approvedCredits), quote = await approvedTerms(req.user._id, input, approvedCredits, () => terms(input));
+ const approvedCredits = z.number().nonnegative().parse(req.body.approvedCredits), quote = await approvedTerms(req.user._id, input, approvedCredits, () => terms(input, String(req.user._id)));
  if (!quote.allowed || quote.credits !== approvedCredits) throw new Error("Review and approve the full current script quote");
  const reservation = await reserveCredits(String(req.user._id), quote, `script:${req.user._id}:${requestId}`);
  try {

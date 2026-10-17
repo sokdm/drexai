@@ -15,6 +15,12 @@ export async function freeAiStatus(now = new Date()) {
  const rows = await FreeAiUsage.find({ _id: { $in: [`${scope}:day:${now.toISOString().slice(0, 10)}`, `${scope}:minute:${now.toISOString().slice(0, 16)}`] } }).lean();
  return { dayRequests: rows.find(r => r._id?.includes(":day:"))?.count || 0, minuteRequests: rows.find(r => r._id?.includes(":minute:"))?.count || 0, dayLimit: values.freeSharedDailyRequests, minuteLimit: values.freeSharedMinuteRequests, userDayLimit: values.freeUserDailyRequests, note: "Application-counted attempts across this API key and MongoDB deployment. Provider usage outside Drex is not included; OpenRouter can impose additional restrictions." };
 }
+export async function freeAiAvailable(userId: string, requests = 1) {
+ const now = new Date(), status = await freeAiStatus(now);
+ const scope = createHash("sha256").update(env.OPENROUTER_API_KEY || "unconfigured").digest("hex").slice(0,24);
+ const user = await FreeAiUsage.findById(`${scope}:user:${userId}:${now.toISOString().slice(0,10)}`).lean();
+ return (user?.count || 0)+requests <= status.userDayLimit && status.dayRequests+requests <= status.dayLimit && status.minuteRequests+requests <= status.minuteLimit;
+}
 export async function admitFreeAi(userId?: string, now = new Date()) {
  if (!userId || !mongoose.isValidObjectId(userId)) throw new Error("Free AI requires a signed-in user.");
  const { values } = await (await import("./creditPricingEngine.js")).getPricingPolicy();

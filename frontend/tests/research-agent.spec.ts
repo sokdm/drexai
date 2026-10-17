@@ -10,8 +10,8 @@ for (const width of [390, 1440]) test(`research chat quotes, streams, and resume
   return route.fulfill({ json: data });
  });
  await page.goto("/dashboard/ai-assistant"); await page.getByLabel("Message YouTube Chef").fill("Find a content opportunity");
- await page.getByRole("button", { name: "Review cost", exact: true }).click(); expect(calls).toBe(0);
- await page.getByRole("button", { name: "Approve 8 credits and send", exact: true }).click();
+ page.on("dialog",d=>d.accept());
+ await page.getByRole("button", { name: "Send", exact: true }).click();
  await expect(page.getByText("Evidence based content idea.", { exact: true })).toBeVisible(); expect(calls).toBe(1);
  if (width > 800) { await page.getByRole("button", { name: "Saved research" }).click(); await expect(page.getByText("Saved answer", { exact: true })).toBeVisible(); }
  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);

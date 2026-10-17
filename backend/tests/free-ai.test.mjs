@@ -47,3 +47,8 @@ test("verified free quotes stay zero and execute without a paid fallback",async(
   assert.equal(calls,1);
  } finally {globalThis.fetch=original;env.OPENROUTER_API_KEY=key;}
 });
+
+test("automatic routing selects free first and switches at the shared quota without calling a paid provider",async()=>{
+ const {assistantModel}=await import("../dist/services/assistantRouting.js");const saved=env.OPENROUTER_API_KEY;env.OPENROUTER_API_KEY="fixture-key";
+ try{await FreeAiUsage.deleteMany({});assert.equal(await assistantModel("ai_research_chat","auto",user,2),"openrouter/fixture/compatible:free");await admitFreeAi(user);await admitFreeAi(user);assert.equal(await assistantModel("ai_research_chat","auto",user,2),"openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL);}finally{env.OPENROUTER_API_KEY=saved;}
+});

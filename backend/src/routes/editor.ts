@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { randomUUID } from "node:crypto";
 import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
@@ -43,6 +45,19 @@ editorRouter.get("/config", wrap(async (req, res) => {
   const productions = await StudioProduction.find({ userId: req.user._id, "timeline.0": { $exists: true } }).select("title status projectId createdAt").sort({ updatedAt: -1 }).limit(100).lean();
   const edits = await VideoEdit.find({ userId: req.user._id }).select("title productionId projectId revision updatedAt").sort({ updatedAt: -1 }).limit(100).lean();
   res.json({ productions, edits, readiness: await readiness() });
+}));
+editorRouter.post("/blank", wrap(async(req,res)=>{
+ const requestId=z.string().uuid().parse(req.body.requestId);
+ const key=(kind:string)=>new mongoose.Types.ObjectId(createHash("sha256").update(String(req.user._id)+":"+requestId+":"+kind).digest("hex").slice(0,24));
+ const editId=key("edit"), projectId=key("project"), productionId=key("production");
+ let edit=await VideoEdit.findOne({_id:editId,userId:req.user._id});
+ if(!edit){const session=await mongoose.startSession();try{await session.withTransaction(async()=>{
+  edit=await VideoEdit.findOne({_id:editId,userId:req.user._id}).session(session);if(edit)return;
+  await AIProject.create([{_id:projectId,userId:req.user._id,title:"Untitled video",type:"Manual edit",scenes:[],latestEditId:editId}],{session});
+  await StudioProduction.create([{_id:productionId,userId:req.user._id,projectId,title:"Untitled video",status:"draft",snapshot:{title:"Untitled video",scenes:[],characters:[],manual:true},settings:{aspectRatio:"16:9"},estimate:{credits:0,missingPricing:[],images:0,audioSegments:0,maxClips:0,maxVideoSeconds:0},steps:[],timeline:[]}],{session});
+  [edit]=await VideoEdit.create([{_id:editId,userId:req.user._id,projectId,productionId,title:"Untitled video",timeline:{clips:[],audio:[],captions:[],aspectRatio:"16:9",musicDecision:"none"},revision:0}],{session});
+ });}finally{await session.endSession();}}
+ res.status(201).json({edit});
 }));
 editorRouter.post("/edits", wrap(async (req, res) => {
   const { productionId } = z.object({ productionId: idSchema }).parse(req.body);

@@ -187,3 +187,10 @@ test("visual upload validates bytes and permission for overlay sources",async()=
  const denied=await request("/edits/"+edit._id+"/visual",{...options,headers:{...options.headers,"x-license-confirmed":"false"}});assert.equal(denied.response.status,400);
  const malformed=await request("/edits/"+edit._id+"/visual",{...options,body:Buffer.from("not an image")});assert.ok(malformed.response.status>=400);
 });
+
+test("blank editor opens without a Studio production and retries preserve one saved edit",async()=>{
+ const requestId=crypto.randomUUID();const count=await VideoEdit.countDocuments({userId:user._id});
+ const first=await request("/blank",json({requestId}));assert.equal(first.response.status,201);assert.equal(first.data.edit.timeline.clips.length,0);
+ const again=await request("/blank",json({requestId}));assert.equal(again.data.edit._id,first.data.edit._id);assert.equal(await VideoEdit.countDocuments({userId:user._id}),count+1);
+ const loaded=await request("/edits/"+first.data.edit._id);assert.equal(loaded.response.status,200);assert.equal(loaded.data.edit.title,"Untitled video");
+});

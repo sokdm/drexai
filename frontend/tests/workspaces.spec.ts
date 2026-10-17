@@ -48,7 +48,7 @@ async function mockApi(page: Page, completed = false) {
     else if (path === "/api/auth/me") data = { user: { id: "test", displayName: "Studio Tester", email: "tester@example.test", emailVerified: true, status: "active", onboarding: { completed: true } } };
     else if (path === "/api/publishing/dashboard") data = { exports: [], projects: [], drafts: [], account: null, history: [], platforms: [{ id: "youtube", label: "YouTube", mode: "oauth", ratio: "16:9" }] };
     else if (path === "/api/editor/config") data = { productions: [], edits: [] };
-    else if (path === "/api/editor/edits") data = { edit };
+    else if (path === "/api/editor/blank" || path === "/api/editor/edits") data = { edit };
     else if (path === `/api/editor/edits/${editorId}`) data = { edit, assets, exports: [], readiness: { queueEnabled: false, workerOnline: false, storageConfigured: false } };
     else if (path.startsWith("/api/editor/assets/")) data = { url: "/assets/drex-ai-references.png" };
     else if (path === "/api/studio/config") data = config;

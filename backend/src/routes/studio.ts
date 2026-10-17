@@ -1,3 +1,4 @@
+import { VideoEdit } from "../models/VideoEdit.js";
 import { assetPackRouter } from "./assetPacks.js";
 import { configuredModels } from "../services/platformControl.js";
 import { ensureProductionEdit, applyProductionEdit } from "../services/sharedEditing.js";
@@ -98,8 +99,9 @@ studioRouter.get("/productions/:id", wrap(async (req, res) => {
 }));
 studioRouter.get("/productions/:id/edit", wrap(async (req, res) => {
  const production = await own(req);
- if (!production.timeline?.length) return res.status(409).json({ error: "Complete the production rough cut before editing." });
- const edit = await ensureProductionEdit(production), timeline = edit.timeline;
+ const manual = (production.snapshot as any)?.manual ? await VideoEdit.findOne({userId:req.user._id,productionId:production._id}) : null;
+ if (!production.timeline?.length && !manual) return res.status(409).json({ error: "Complete the production rough cut before editing." });
+ const edit = manual || await ensureProductionEdit(production), timeline = edit.timeline;
  const ids = [...timeline.clips.map((c: any) => c.assetId), ...(timeline.overlays || []).map((o: any) => o.assetId), ...timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
  res.json({ edit, assets: await MediaAsset.find({ _id: { $in: ids }, userId: req.user._id, deletedAt: null }).select("type durationSeconds metadata sceneId").lean() });
 }));
