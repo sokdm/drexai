@@ -3,10 +3,16 @@ import { timelineSchema, timelineDuration, type EditorTimeline } from "@drex/sha
 export function editingCommand(input: EditorTimeline, message: string, captions: any[] = []) {
  const timeline = timelineSchema.parse(structuredClone(input)), text = message.trim().toLowerCase(); let result: EditorTimeline = timeline, explanation = "";
  if (/silent|silence|speed/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made.");
- if (/cinematic|monochrome|black and white|vivid|warm|cool|vignette|sharpen|reset effects/.test(text)) {
+ if (/professional/.test(text)) {
+  result.clips = result.clips.map((c, i) => ({ ...c, look: "cinematic", brightness: undefined, contrast: undefined, saturation: undefined, transition: i < result.clips.length - 1 ? "fade" : "cut" }));
+  result.audio = result.audio.map(a => a.role === "music" ? { ...a, volume: Math.min(a.volume, .15) } : a);
+  result.captions = result.captions.map(c => ({ ...c, style: { ...c.style, preset: "bold", animation: "pop" } }));
+  explanation = "Applied cinematic color, fade-through-black scene boundaries, animated existing captions and lowered existing music to at most 15%. Review the result; no new media was generated.";
+ } else if (/cinematic|monochrome|black and white|vivid|warm|cool|vignette|sharpen|reset effects/.test(text)) {
   const look = /reset effects/.test(text) ? "original" : /monochrome|black and white/.test(text) ? "monochrome" : /vivid/.test(text) ? "vivid" : /warm/.test(text) ? "warm" : /cool/.test(text) ? "cool" : /cinematic/.test(text) ? "cinematic" : undefined;
   result.clips = result.clips.map(c => ({ ...c, ...(look ? { look, brightness: undefined, contrast: undefined, saturation: undefined } : {}), ...(/vignette/.test(text) ? { vignette: true } : {}), ...(/sharpen/.test(text) ? { sharpen: .6 } : {}), ...(/reset effects/.test(text) ? { sharpen: 0, vignette: false } : {}) }));
   explanation = "Updated clip color/effect settings. Preview the color changes and export through FFmpeg to render sharpening and vignette.";
+  if (/transition/.test(text)) { result.clips = result.clips.map((c, i) => ({ ...c, transition: i < result.clips.length - 1 ? "fade" : "cut" })); explanation += " Added fade-through-black transitions."; }
  } else if (/transition/.test(text)) {
   result.clips = result.clips.map((clip, i) => ({ ...clip, transition: i === result.clips.length - 1 ? "cut" : "fade" }));
   explanation = "Applied supported fade transitions. Color grading and cinematic effects were not added.";

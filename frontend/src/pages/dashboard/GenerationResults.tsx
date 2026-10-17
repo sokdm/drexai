@@ -48,7 +48,7 @@ export function GenerationResults({ kind, assets, jobs, busy, onRefresh, onRegen
         <span>{asset.metadata?.name || `${kind === "video" ? "Clip" : "Image"} ${assets.length - index}`}</span>
       </button>)}{!assets.length && <p className="output-empty">No saved {kind === "video" ? "clips" : "images"}.</p>}</div> : <div className="job-list">{jobs.map(job => <article key={job._id}>
         <div className="flex min-w-0 items-center gap-2"><span className={`job-dot ${job.status}`} /><strong className="capitalize">{job.status}</strong><time>{job.createdAt ? new Date(job.createdAt).toLocaleString() : ""}</time></div>
-        <p>{job.prompt || job.motionPrompt}</p><div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>{job.model}</span><span>{job.approvedCredits ?? 0} credits</span></div>{job.error && <p className="text-red-600">{job.error}</p>}
+        <p>{job.prompt || job.motionPrompt}</p><div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>{job.model}</span><span>{typeof job.outputMetadata?.creditsCharged === "number" ? `${job.outputMetadata.creditsCharged} credits charged` : `${job.approvedCredits ?? 0} credits approved`}</span></div>{job.error && <p className="text-red-600">{job.error}</p>}
       </article>)}{!jobs.length && <p className="output-empty">No generation history.</p>}</div>}
     </section>
   </main>;

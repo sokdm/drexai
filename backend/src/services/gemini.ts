@@ -63,7 +63,7 @@ export async function geminiJson<T>(input: {
   schema: z.ZodSchema<T>;
   model?: string;
   maxOutputTokens?: number;
-  userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number };
+  userId?: string; reservationId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number };
 }) {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
@@ -90,7 +90,7 @@ export async function geminiJson<T>(input: {
   return result.data;
 }
 
-export async function geminiText(input: { system: string; prompt: string; maxOutputTokens?: number; model?: string; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number } }) {
+export async function geminiText(input: { system: string; prompt: string; maxOutputTokens?: number; model?: string; userId?: string; reservationId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number } }) {
   assertGeminiReady();
   const selectedModel = input.model || await defaultModel("text", env.GEMINI_MODEL);
   if (isOpenRouter(selectedModel)) return routerText({ ...input, model: selectedModel });

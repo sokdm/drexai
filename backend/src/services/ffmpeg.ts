@@ -69,7 +69,7 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
     const scale = clip.fit === "cover" ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:(iw-ow)*${clip.cropX ?? 0.5}:(ih-oh)/2` : `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     const fade = Math.min(0.3, clip.duration / 3);
     const effects = effectValues(clip);
-    const filters = `${scale},setsar=1,fps=30,format=yuv420p,setpts=PTS-STARTPTS,eq=brightness=${effects.brightness}:contrast=${effects.contrast}:saturation=${effects.saturation}${effects.sharpen ? `,unsharp=5:5:${effects.sharpen}` : ""}${effects.vignette ? ",vignette=PI/5" : ""}${clip.transition === "fade" ? `,fade=t=in:st=0:d=${fade},fade=t=out:st=${clip.duration - fade}:d=${fade}` : ""}`;
+    const filters = `${scale},setsar=1,fps=30,format=yuv420p,setpts=(PTS-STARTPTS)/${clip.speed ?? 1},eq=brightness=${effects.brightness}:contrast=${effects.contrast}:saturation=${effects.saturation}${effects.sharpen ? `,unsharp=5:5:${effects.sharpen}` : ""}${effects.vignette ? ",vignette=PI/5" : ""}${clip.transition === "fade" ? `,fade=t=in:st=0:d=${fade},fade=t=out:st=${clip.duration - fade}:d=${fade}` : ""}`;
     const segment = `segment-${i}.mp4`; segments.push(segment);
     const frames = Math.max(1, Math.round((elapsed + clip.duration) * 30) - Math.round(elapsed * 30)); elapsed += clip.duration;
     args.push("-frames:v", String(frames), "-vf", filters, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", segment);
@@ -80,14 +80,14 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
   const args = [...common, "-filter_complex_threads", "1", "-f", "concat", "-safe", "1", "-i", "segments.txt", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"];
   const tracks = timeline.audio.filter(a => !a.muted && a.volume > 0 && trackStart(timeline, a) < total);
   for (const audio of tracks) { const file = sources.get(audio.assetId); if (!file) throw new Error("Missing audio source"); args.push("-i", file); }
-  const nativeTracks: { inputIndex: number; sourceIn: number; duration: number; start: number; volume: number }[] = [];
+  const nativeTracks: { inputIndex: number; sourceIn: number; duration: number; start: number; volume: number; speed: number }[] = [];
   let start = 0;
   for (const clip of timeline.clips) {
     if (clip.kind === "video" && clip.sourceAudio === true && !clip.sourceMuted && (clip.sourceVolume ?? 1) > 0) {
       const file = sources.get(clip.assetId!); if (!file) throw new Error("Missing native audiovisual source");
       const probe = await probeMedia(file);
       if (!probe.audio && clip.nativeDialogue) throw new Error("Native dialogue clip has no audio track; regenerate or review before export");
-      if (probe.audio) { args.push("-i", file); nativeTracks.push({ inputIndex: tracks.length + nativeTracks.length + 2, sourceIn: clip.sourceIn, duration: clip.duration, start, volume: clip.sourceVolume ?? 1 }); }
+      if (probe.audio) { args.push("-i", file); nativeTracks.push({ inputIndex: tracks.length + nativeTracks.length + 2, sourceIn: clip.sourceIn, duration: clip.duration, start, speed: clip.speed ?? 1, volume: clip.sourceVolume ?? 1 }); }
     }
     start += clip.duration;
   }
@@ -96,7 +96,7 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
     const length = Math.min(a.duration, total - trackStart(timeline, a));
     graphs.push(`[${i + 2}:a]atrim=start=${a.sourceIn}:duration=${length},asetpts=PTS-STARTPTS,aresample=48000,volume=${a.volume}${a.fadeIn > 0 ? `,afade=t=in:d=${Math.min(a.fadeIn, length)}` : ""}${a.fadeOut > 0 ? `,afade=t=out:st=${Math.max(0, length - a.fadeOut)}:d=${Math.min(a.fadeOut, length)}` : ""},adelay=${Math.round(trackStart(timeline, a) * 1000)}:all=1[a${i}]`);
   });
-  nativeTracks.forEach((a, i) => graphs.push(`[${a.inputIndex}:a:0]atrim=start=${a.sourceIn}:duration=${a.duration},asetpts=PTS-STARTPTS,aresample=48000,volume=${a.volume},adelay=${Math.round(a.start * 1000)}:all=1[n${i}]`));
+  nativeTracks.forEach((a, i) => graphs.push(`[${a.inputIndex}:a:0]atrim=start=${a.sourceIn}:duration=${a.duration * a.speed},asetpts=PTS-STARTPTS,atempo=${Math.max(.5, Math.min(2, a.speed))}${a.speed < .5 || a.speed > 2 ? `,atempo=${a.speed / Math.max(.5, Math.min(2, a.speed))}` : ""},aresample=48000,volume=${a.volume},adelay=${Math.round(a.start * 1000)}:all=1[n${i}]`));
   graphs.push(`[base]${nativeTracks.map((_, i) => `[n${i}]`).join("")}${tracks.map((_, i) => `[a${i}]`).join("")}amix=inputs=${tracks.length + nativeTracks.length + 1}:duration=first:normalize=0,alimiter=limit=0.95:level=false:latency=true[aout]`);
   args.push("-filter_complex", graphs.join(";"), "-vf", "ass=captions.ass", "-map", "0:v:0", "-map", "[aout]", "-t", String(total), "-c:v", "libx264", "-preset", "veryfast", "-crf", String({ draft: 28, standard: 23, high: 18 }[settings.quality]), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-progress", "pipe:1", "output.mp4");
   await runMedia("ffmpeg", args, { cwd: directory, signal, onProgress: seconds => onProgress(50 + Math.min(1, seconds / total) * 40) });

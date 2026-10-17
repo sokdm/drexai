@@ -12,13 +12,16 @@ import { Wallet } from "../dist/models/Wallet.js";
 import { CreditPackage } from "../dist/models/CreditPackage.js";
 import { CreditReservation } from "../dist/models/CreditReservation.js";
 import { AIConversation } from "../dist/models/AIConversation.js";
+import { AIProject } from "../dist/models/AIProject.js";
+import { StudioProduction, StudioEvent } from "../dist/models/StudioProduction.js";
+import { VideoEdit } from "../dist/models/VideoEdit.js";
 import { PricingOverride } from "../dist/models/Finance.js";
 import { ProviderControl, ProviderLease } from "../dist/models/Admin.js";
 import { withProvider } from "../dist/services/platformControl.js";
 import { hashSecret } from "../dist/utils/crypto.js";
 import { env } from "../dist/config/env.js";
 import { errorHandler } from "../dist/middleware/errorHandler.js";
-let db, server, base, user; const original = fetch; let providerCalls = 0;
+let db, server, base, user; const original = fetch; let providerCalls = 0, plannedTools = [];
 before(async () => {
  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }] }); await mongoose.connect(db.getUri("research_agent"));
  env.OPENROUTER_API_KEY = "test"; env.OPENROUTER_MANAGEMENT_KEY = undefined;
@@ -31,7 +34,7 @@ before(async () => {
   if (String(url).endsWith("/models")) return Response.json({ data: [{ id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }] });
   if (String(url).endsWith("/key")) return Response.json({ data: { limit_remaining: 100 } });
   assert.ok(String(url).endsWith("chat/completions")); providerCalls++; const body = JSON.parse(options.body);
-  if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: '{"tools":[]}' }, finish_reason: "stop" }], usage: { cost: .001 } });
+  if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: .001 } });
   return new Response('data: {"id":"answer-1","choices":[{"delta":{"content":"Original idea. "}}]}\n\ndata: {"choices":[{"delta":{"content":"Review your draft."},"finish_reason":"stop"}],"usage":{"cost":0.001}}\n\ndata: [DONE]\n\n');
  };
  const app = express(); app.use(express.json(), cookieParser()); app.use("/api/ai", researchAgentRouter); app.use(errorHandler); server = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); }); base = `http://127.0.0.1:${server.address().port}/api/ai`;
@@ -54,4 +57,22 @@ test("agent approval streams a saved response, bills once and protects conversat
  const conversation = await AIConversation.findOne({ userId: user._id }); assert.equal(conversation.messages.length, 2); assert.equal(conversation.messages[1].content, "Original idea. Review your draft."); assert.equal(conversation.activeUntil, undefined); assert.equal(providerCalls, 2); assert.equal(await CreditReservation.countDocuments({ status: "settled" }), 1);
  assert.equal((await original(base + `/agent/conversations/${conversation._id}`)).status, 401);
  const other = await AIConversation.create({ userId: new mongoose.Types.ObjectId(), messages: [] }); assert.equal((await original(base + `/agent/conversations/${other._id}`, { headers })).status, 404);
+});
+
+test("Director tools require permission and mutate the same saved editor timeline with real activity logs", async () => {
+ const project = await AIProject.create({ userId: user._id, title: "Director test" });
+ const production = await StudioProduction.create({ userId: user._id, projectId: project._id, title: "Director test", status: "completed", snapshot: {}, settings: {}, estimate: {}, timeline: [{ sceneId: "scene", durationSeconds: 3 }] });
+ const edit = await VideoEdit.create({ userId: user._id, projectId: project._id, productionId: production._id, title: "Director test", timeline: { clips: [{ id: "title", kind: "title", label: "Title", text: "Hello", sourceIn: 0, duration: 3 }], audio: [], captions: [], aspectRatio: "16:9", musicDecision: "none" } });
+ plannedTools = [{ name: "edit_timeline", query: "Make cinematic" }];
+ try {
+  for (const allowTimelineEdits of [false, true]) {
+   const payload = { message: "Make this production cinematic", productionId: String(production._id), allowTimelineEdits };
+   const quoted = await original(base + "/agent/quote", { method: "POST", headers, body: JSON.stringify(payload) }); const { quote } = await quoted.json();
+   const response = await original(base + "/agent/chat", { method: "POST", headers, body: JSON.stringify({ ...payload, approvedCredits: quote.credits }) }); assert.match(await response.text(), /event: done/);
+   const saved = await VideoEdit.findById(edit._id); assert.equal(saved.revision, allowTimelineEdits ? 1 : 0);
+  }
+  assert.equal((await VideoEdit.findById(edit._id)).timeline.clips[0].look, "cinematic");
+  assert.ok(await StudioEvent.exists({ productionId: production._id, level: "failure" }));
+  assert.ok(await StudioEvent.exists({ productionId: production._id, level: "success" }));
+ } finally { plannedTools = []; }
 });

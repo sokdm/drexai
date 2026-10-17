@@ -1,3 +1,4 @@
+import { releaseReservation } from "../dist/services/wallet.js";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,7 @@ import { LedgerEntry } from "../dist/models/LedgerEntry.js";
 import { CreditReservation } from "../dist/models/CreditReservation.js";
 import { GenerationPriceRule } from "../dist/models/GenerationPriceRule.js";
 import { AIProject } from "../dist/models/AIProject.js";
+import { ScriptJob } from "../dist/models/ScriptJob.js";
 import { ImageGenerationJob } from "../dist/models/ImageGenerationJob.js";
 import { hashSecret } from "../dist/utils/crypto.js";
 import { env } from "../dist/config/env.js";
@@ -57,12 +59,13 @@ test("provider timeout returns an actionable error and releases reserved script 
   assert.equal(result.status, 500); assert.match(result.data.error, /90 seconds/);
   const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
 });
-test("placeholder Redis rejects image submission before creating a job or reserving credits", async () => {
+test("placeholder Redis falls back to a persisted Mongo job without provider execution", async () => {
   env.IMAGE_QUEUE_ENABLED = true; env.REDIS_URL = "REPLACE_WITH_RENDER_INTERNAL_REDIS_URL";
   const settings = { prompt: "An original city", model: "gemini-nano-banana-2.1", aspectRatio: "16:9", resolution: "1K", numberOfImages: 1, characterReferenceIds: [] };
   const quote = await post("/api/images/quote", settings);
   const result = await post("/api/images/generate", { ...settings, approvedCredits: quote.data.quote.credits });
-  assert.match(result.data.error, /actual Render Key Value/); assert.equal(await ImageGenerationJob.countDocuments(), 0);
+  assert.equal(result.status, 202); const job = await ImageGenerationJob.findOne({ userId: customer._id }); assert.equal(job.dispatchMode, "mongo"); assert.equal(job.status, "queued");
+  await releaseReservation(String(job.reservationId), "test_cleanup"); await ImageGenerationJob.deleteOne({ _id: job._id });
   const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
 });
 
@@ -71,4 +74,16 @@ test("malformed character output returns a clear error and releases credits", as
   const result = await post("/api/ai/scripts/generate", { approvedCredits: quote.data.quote.credits, settings: { storyTopic: "Another story" } });
   assert.equal(result.status, 500); assert.match(result.data.error, /characters.0/);
   const wallet = await Wallet.findOne({ userId: customer._id }); assert.equal(wallet.availableCredits, 9); assert.equal(wallet.reservedCredits, 0);
+});
+test("background scripts return a durable job, resume after page navigation and deduplicate request IDs", async () => {
+ mode = "success"; await ScriptJob.init();
+ const quote = await post("/api/ai/quote", { feature: "story_generation" });
+ const payload = { background: true, requestId: "d54e1c00-7eb1-42fa-90e6-58e0d973c621", approvedCredits: quote.data.quote.credits, settings: { storyTopic: "Recoverable original story", nicheId: "" } };
+ const result = await post("/api/ai/scripts/generate", payload); assert.equal(result.status, 202);
+ const again = await post("/api/ai/scripts/generate", payload); assert.equal(again.data.job._id, result.data.job._id);
+ let saved;
+ for (let i = 0; i < 100; i++) { const response = await fetch(base + "/api/ai/scripts/jobs/" + result.data.job._id, { headers }); saved = await response.json(); if (saved.job.status !== "processing") break; await new Promise(r => setTimeout(r, 25)); }
+ assert.equal(saved.job.status, "completed"); assert.equal(saved.project.scenes.length, 1);
+ assert.equal((await Wallet.findOne({ userId: customer._id })).availableCredits, 8);
+ assert.equal((await fetch(base + "/api/ai/scripts/jobs/" + result.data.job._id)).status, 401);
 });

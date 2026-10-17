@@ -42,7 +42,9 @@ async function mockApi(page: Page, completed = false) {
     else if (path.endsWith("/approve")) { production.status = "queued"; production.maxCredits = request.postDataJSON().maxCredits; data = { production }; }
     else if (path.endsWith("/control")) { production.status = "cancelled"; data = { production }; }
     else if (path.startsWith("/api/studio/assets/")) data = { url: "/assets/drex-ai-references.png" };
+    else if (path.startsWith("/api/studio/productions/") && path.endsWith("/edit")) data = { edit, assets };
     else if (path.startsWith("/api/studio/productions/")) data = { production, assets, events: [{ _id: "event-1", createdAt: new Date().toISOString(), level: completed ? "success" : "waiting", message: completed ? "Your video production is ready for review." : "Plan ready for approval." }] };
+    else if (path === "/api/ai/agent/conversations") data = { conversations: [] };
     else if (path === "/api/ai/niches") {
       if (method === "POST") niches.push({ ...request.postDataJSON(), _id: String(niches.length + 1) });
       data = { niches };
@@ -159,6 +161,7 @@ test("rough cut synchronizes playable video and measured audio", async ({ page }
   wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(96000, 40);
   state.production.timeline[0].clips = [{ assetId: "video", startSeconds: 0, durationSeconds: 2 }];
   state.production.timeline[0].audio = [{ assetId: "audio", startSeconds: 0, durationSeconds: 2 }];
+  await page.route(`**/api/studio/productions/${productionId}/edit`, route => route.fulfill({ json: { edit: { _id: "e11111111111111111111111", revision: 0, timeline: { aspectRatio: "16:9", clips: [{ id: "native", assetId: "video", label: "Native clip", kind: "video", sourceIn: 0, duration: 2, sourceAudio: false, transition: "cut", fit: "contain", text: "", textStyle: {} }, { id: "tail", assetId: "asset-2", label: "Second scene", kind: "image", sourceIn: 0, duration: 2, transition: "cut", fit: "contain", text: "", textStyle: {} }], audio: [{ id: "voice", assetId: "audio", label: "Speech", role: "narration", start: 0, sourceIn: 0, duration: 2, volume: 1, fadeIn: 0, fadeOut: 0 }], captions: [] } }, assets: [{ _id: "video", type: "video" }, { _id: "audio", type: "audio" }] } }));
   await page.route(`**/api/studio/productions/${productionId}`, route => route.fulfill({ json: { production: state.production, assets: [{ _id: "asset-1", type: "image" }, { _id: "asset-2", type: "image" }, { _id: "video", type: "video" }, { _id: "audio", type: "audio" }], events: [] } }));
   await page.route("**/api/studio/assets/video/url", route => route.fulfill({ json: { url: "data:video/webm;base64," + webm } }));
   await page.route("**/api/studio/assets/audio/url", route => route.fulfill({ json: { url: "data:audio/wav;base64," + wav.toString("base64") } }));

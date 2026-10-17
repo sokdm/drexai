@@ -7,7 +7,7 @@ export const captionStyleSchema = z.object({ font: z.enum(["Arial", "Georgia", "
 export const editorClipSchema = z.object({
   id: identifier, sceneId: z.string().max(80).optional(), label: z.string().max(150),
   kind: z.enum(["video", "image", "title"]), assetId: assetId.optional(),
-  sourceAudio: z.boolean().optional(), sourceVolume: z.number().min(0).max(1).optional(), sourceMuted: z.boolean().optional(), nativeDialogue: z.boolean().optional(),
+  speed: z.number().min(0.25).max(4).optional(), sourceAudio: z.boolean().optional(), sourceVolume: z.number().min(0).max(1).optional(), sourceMuted: z.boolean().optional(), nativeDialogue: z.boolean().optional(),
   cropX: z.number().min(0).max(1).optional(),
   look: z.enum(["original", "cinematic", "vivid", "monochrome", "warm", "cool"]).optional(),
   brightness: z.number().min(-0.5).max(0.5).optional(), contrast: z.number().min(0.5).max(2).optional(), saturation: z.number().min(0).max(2).optional(),
@@ -47,7 +47,7 @@ export function outputDimensions(ratio: EditorTimeline["aspectRatio"], resolutio
 export function splitTimeline(t: EditorTimeline, id: string, localTime: number, newId: string): EditorTimeline {
   const clip = t.clips.find(c => c.id === id);
   if (!clip || localTime < 0.1 || localTime > clip.duration - 0.1) return t;
-  return { ...t, clips: t.clips.flatMap(c => c.id !== id ? [c] : [{ ...c, duration: localTime, transition: "cut" as const }, { ...c, id: newId, sourceIn: c.kind === "video" ? c.sourceIn + localTime : c.sourceIn, duration: c.duration - localTime }]) };
+  return { ...t, clips: t.clips.flatMap(c => c.id !== id ? [c] : [{ ...c, duration: localTime, transition: "cut" as const }, { ...c, id: newId, sourceIn: c.kind === "video" ? c.sourceIn + localTime * (c.speed ?? 1) : c.sourceIn, duration: c.duration - localTime }]) };
 }
 export function deleteClips(t: EditorTimeline, ids: string[]): EditorTimeline {
   const remove = new Set(ids);

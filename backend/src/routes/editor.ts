@@ -24,6 +24,7 @@ import { editorAssetBytes } from "../services/videoEditing.js";
 import { renderTimeline, runMedia } from "../services/ffmpeg.js";
 import { speechRanges, retainTimelineRanges } from "../services/silenceEditing.js";
 import { withProvider } from "../services/platformControl.js";
+import { measureWaveform } from "../services/waveform.js";
 
 export const editorRouter = Router();
 editorRouter.use(requireAuth, requireCsrf, rateLimit({ windowMs: 60000, limit: 180, standardHeaders: true, legacyHeaders: false }));
@@ -110,6 +111,14 @@ editorRouter.post("/edits/:id/audio", raw({ type: ["audio/*", "application/octet
 editorRouter.get("/assets/:assetId/url", wrap(async (req, res) => {
   const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, deletedAt: null });
   if (!asset) editorFail("Asset not found", 404); const url = await editorAssetUrl(asset); if (!url) editorFail("Media unavailable", 503); res.json({ url });
+}));
+editorRouter.post("/assets/:assetId/waveform", rateLimit({ windowMs: 60000, limit: 6 }), wrap(async (req, res) => {
+ const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, deletedAt: null, type: { $in: ["audio", "video"] } });
+ if (!asset) return res.status(404).json({ error: "Audio source not found" });
+ if (asset.metadata?.waveform) return res.json(asset.metadata.waveform);
+ const waveform = await withProvider("ffmpeg", () => measureWaveform(asset));
+ await MediaAsset.updateOne({ _id: asset._id, userId: req.user._id }, { $set: { "metadata.waveform": waveform } });
+ res.json(waveform);
 }));
 editorRouter.post("/edits/:id/export-quote", wrap(async (req, res) => { const edit = await own(req); const duration = (edit.timeline.clips || []).reduce((n: number, c: any) => n + c.duration, 0); const rule = await GenerationPriceRule.findOne({ feature: "final_rendering", provider: "ffmpeg", model: "ffmpeg", active: true }); const terms = rule ? await createQuote({ feature: "final_rendering", provider: "ffmpeg", model: "ffmpeg", unit: "minute", quantity: Math.max(1, duration / 60) }) : { allowed: true, credits: 0, feature: "final_rendering", provider: "ffmpeg", model: "ffmpeg", estimatedCostUsd: null }; res.json({ quote: await rememberQuote(req.user._id, { editId: String(edit._id), revision: edit.revision, settings: req.body.settings }, terms) }); }));
 editorRouter.post("/edits/:id/exports", rateLimit({ windowMs: 60000, limit: 5 }), wrap(async (req, res) => {

@@ -37,7 +37,7 @@ export async function validateTimelineAssets(timeline: EditorTimeline, userId: s
     if (c.kind === "title") continue;
     const asset = map.get(c.assetId!)!;
     if (asset.type !== c.kind) editorFail("Clip type does not match its source");
-    if (c.kind === "video" && asset.durationSeconds && c.sourceIn + c.duration > asset.durationSeconds + 0.05) editorFail(`Trim exceeds source duration: ${c.label}`);
+    if (c.kind === "video" && asset.durationSeconds && c.sourceIn + c.duration * (c.speed ?? 1) > asset.durationSeconds + 0.05) editorFail(`Trim exceeds source duration: ${c.label}`);
     if (settings && asset.width && asset.height) {
       const [w, h] = outputDimensions(timeline.aspectRatio, settings.resolution);
       const scale = c.fit === "cover" ? Math.max(w / asset.width, h / asset.height) : Math.min(w / asset.width, h / asset.height);

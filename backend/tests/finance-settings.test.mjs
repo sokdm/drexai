@@ -6,7 +6,8 @@ import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { calculateCreditPrice, defaultPricingPolicy, quoteAutomaticCredits } from "../dist/services/creditPricingEngine.js";
-import { seedCreditConfig, reserveCredits, releaseReservation } from "../dist/services/wallet.js";
+import { seedCreditConfig, reserveCredits, releaseReservation, settleReservation } from "../dist/services/wallet.js";
+import { GatewayUsage } from "../dist/services/openrouter.js";
 import { syncProviderRecord, checkProviderAffordability } from "../dist/services/openrouterManagement.js";
 import { PricingPolicy, PricingOverride, ProviderSnapshot, ProviderActivity, DailySpendBudget, AppMigration } from "../dist/models/Finance.js";
 import { CreditPackage } from "../dist/models/CreditPackage.js";
@@ -47,9 +48,9 @@ test("requested packages migrate legacy prices once and preserve later admin edi
 });
 test("decimal pricing uses cheapest package, protects margin and scales image quantity", () => {
  const packages = [{ amount: 10, credits: 500 }, { amount: 20, credits: 1000 }, { amount: 90, credits: 5000 }];
- const low = calculateCreditPrice("0.01", packages, defaultPricingPolicy, 1, true); assert.equal(low.credits, 5); assert.equal(low.creditUsd, "0.018");
- assert.equal(calculateCreditPrice("0.02", packages, defaultPricingPolicy, 2, true).credits, 10);
- const expensive = calculateCreditPrice("0.04", packages, defaultPricingPolicy, 1, true); assert.equal(expensive.credits, 20); assert.ok(Number(expensive.estimatedMarginPct) >= 85);
+ const low = calculateCreditPrice("0.01", packages, defaultPricingPolicy, 1, true); assert.equal(low.credits, 2); assert.equal(low.creditUsd, "0.018");
+ assert.equal(calculateCreditPrice("0.02", packages, defaultPricingPolicy, 2, true).credits, 4);
+ const expensive = calculateCreditPrice("0.04", packages, defaultPricingPolicy, 1, true); assert.equal(expensive.credits, 7); assert.ok(Number(expensive.estimatedMarginPct) >= 66);
  assert.throws(() => calculateCreditPrice("NaN", packages, defaultPricingPolicy), /positive verified/);
  assert.throws(() => calculateCreditPrice("1", [], defaultPricingPolicy), /active USD/);
 });
@@ -78,16 +79,16 @@ test("automatic pricing policies require admin and CSRF, persist and detect stal
 test("verified cost bounds scale quantity and expired bounds fail closed without generation", async () => {
  const model = "openrouter/test/verified";
  await PricingOverride.create({ feature: "text_to_image", model, unit: "image:1K", costUsd: "0.04", expiresAt: new Date(Date.now() + 60000), verifiedAt: new Date(), verificationUrl: "https://example.test/cost", settings: { resolution: "1K" } });
- const quote = await quoteAutomaticCredits({ feature: "text_to_image", model, unit: "image:1K", quantity: 2, settings: { resolution: "1K" } }); assert.equal(quote.credits, 40); assert.equal(quote.estimatedCostUsd, .08);
+ const quote = await quoteAutomaticCredits({ feature: "text_to_image", model, unit: "image:1K", quantity: 2, settings: { resolution: "1K" } }); assert.equal(quote.credits, 14); assert.equal(quote.estimatedCostUsd, .08);
  await assert.rejects(() => quoteAutomaticCredits({ feature: "text_to_image", model, unit: "image:1K", quantity: 2, settings: { resolution: "4K" } }), /does not cover/);
 });
 test("published text rates and native-audio video rates scale duration, outputs and resolution", async () => {
  const saved = globalThis.fetch; let calls = 0;
  globalThis.fetch = async url => { calls++; assert.ok(!String(url).includes("chat/completions")); return Response.json({ data: String(url).endsWith("videos/models") ? [{ id: "google/veo-3.1", pricing: { duration_seconds_with_audio: ".40", duration_seconds_with_audio_4k: ".60" } }] : [{ id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, pricing: { prompt: ".000000825", completion: ".000004125", image: ".000000825", audio: ".000000825", web_search: ".014", input_cache_write: ".0000000416666666666667", internal_reasoning: ".000004125" } }] }); };
  try {
-  const text = await quoteAutomaticCredits({ feature: "story_generation", model: "openrouter/google/gemini-3.8-flash", quantity: 1 }); assert.equal(text.credits, 33);
+  const text = await quoteAutomaticCredits({ feature: "story_generation", model: "openrouter/google/gemini-3.8-flash", quantity: 1 }); assert.equal(text.credits, 12);
   const video = settings => quoteAutomaticCredits({ feature: "image_to_video", model: "openrouter/google/veo-3.1", quantity: settings.seconds * settings.outputs, unit: "second:" + settings.quality, settings });
-  const standard = await video({ seconds: 8, outputs: 1, quality: "720p" }); assert.equal(standard.estimatedCostUsd, 3.2); assert.equal(standard.credits, 1571);
+  const standard = await video({ seconds: 8, outputs: 1, quality: "720p" }); assert.equal(standard.estimatedCostUsd, 3.2); assert.equal(standard.credits, 550);
   const multiple = await video({ seconds: 8, outputs: 2, quality: "720p" }); assert.equal(multiple.estimatedCostUsd, 6.4); assert.ok(multiple.credits >= standard.credits * 2 - 1);
   assert.equal((await video({ seconds: 8, outputs: 1, quality: "4K" })).estimatedCostUsd, 4.8); assert.equal(calls, 2);
  } finally { globalThis.fetch = saved; }
@@ -128,4 +129,20 @@ test("Redis failure persists image and video work for bounded Mongo fallback", a
  assert.equal(executions, 2); assert.equal((await ImageGenerationJob.findById(image._id)).status, "completed"); assert.equal((await VideoGenerationJob.findById(video._id)).status, "completed");
  const delivered = await ImageGenerationJob.create({ userId: user._id, prompt: "Next image", model: "test", status: "queued" });
  assert.equal(await dispatchGeneration("image", delivered.id, { ready: async () => {}, enqueue: async () => { throw new Error("Disconnected after readiness"); } }), "mongo");
+});
+
+test("verified actual costs release unused new quote ceilings exactly once and preserve legacy terms", async () => {
+ await PricingPolicy.updateOne({ _id: "global" }, { "values.userDailyUsd": 50, "values.globalDailyUsd": 200 });
+ const id = new mongoose.Types.ObjectId(); await Wallet.create({ userId: id, availableCredits: 1000 });
+ const terms = { credits: 20, provider: "openrouter", model: "openrouter/test/actual", feature: "story_generation", estimatedCostUsd: .1, assumptions: defaultPricingPolicy, creditUsd: ".018", quantity: 1 };
+ const reserve = await reserveCredits(String(id), terms, "actual-fixture");
+ await GatewayUsage.create({ reservationId: reserve._id, userId: id, model: terms.model, kind: "text", requestId: "actual-fixture-request", status: "completed", costUsd: .002 });
+ await settleReservation(String(reserve._id)); await settleReservation(String(reserve._id));
+ const wallet = await Wallet.findOne({ userId: id }); assert.equal(wallet.availableCredits, 999); assert.equal(wallet.spentCredits, 1); assert.equal(wallet.reservedCredits, 0);
+ assert.equal(await LedgerEntry.countDocuments({ idempotencyKey: "actual-cost-release:" + reserve._id }), 1);
+ const legacy = await reserveCredits(String(id), { credits: 20, feature: "legacy", provider: "openrouter", estimatedCostUsd: .1 }, "legacy-fixture");
+ await settleReservation(String(legacy._id), .002); assert.equal((await CreditReservation.findById(legacy._id)).credits, 20);
+ const unknown = await reserveCredits(String(id), terms, "unknown-fixture");
+ await GatewayUsage.create({ reservationId: unknown._id, userId: id, model: terms.model, kind: "text", status: "completed" });
+ await settleReservation(String(unknown._id)); const unverified = await CreditReservation.findById(unknown._id); assert.equal(unverified.credits, 20); assert.equal(unverified.providerCostUsd, undefined);
 });

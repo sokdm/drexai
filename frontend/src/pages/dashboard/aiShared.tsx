@@ -3,6 +3,7 @@ import { api } from "../../lib/api";
 export async function quote(feature: string) {
   const data = await api<{ quote: { allowed: boolean; credits: number; reason?: string } }>("/api/ai/quote", { method: "POST", body: JSON.stringify({ feature }) });
   if (!data.quote.allowed) throw new Error(data.quote.reason ?? "Pricing unavailable");
+  if (!window.confirm(`Approve a maximum of ${data.quote.credits} credits for this AI operation? Verified lower usage on eligible OpenRouter quotes releases unused credits.`)) throw new Error("Generation cancelled before any paid request.");
   return data.quote.credits;
 }
 

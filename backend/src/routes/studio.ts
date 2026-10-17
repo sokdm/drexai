@@ -1,4 +1,5 @@
 import { configuredModels } from "../services/platformControl.js";
+import { ensureProductionEdit, applyProductionEdit } from "../services/sharedEditing.js";
 import { Router, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -87,6 +88,18 @@ studioRouter.get("/productions/:id", wrap(async (req, res) => {
   const assets = await MediaAsset.find({ _id: { $in: assetIds }, userId: req.user._id, deletedAt: null }).lean();
   const events = await StudioEvent.find({ productionId: production._id, userId: req.user._id }).sort({ _id: -1 }).limit(300).lean();
   res.json({ production, assets: assets.map(a => ({ ...a, url: undefined })), events: events.reverse() });
+}));
+studioRouter.get("/productions/:id/edit", wrap(async (req, res) => {
+ const production = await own(req);
+ if (!production.timeline?.length) return res.status(409).json({ error: "Complete the production rough cut before editing." });
+ const edit = await ensureProductionEdit(production), timeline = edit.timeline;
+ const ids = [...timeline.clips.map((c: any) => c.assetId), ...timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
+ res.json({ edit, assets: await MediaAsset.find({ _id: { $in: ids }, userId: req.user._id, deletedAt: null }).select("type durationSeconds metadata sceneId").lean() });
+}));
+studioRouter.post("/productions/:id/edit-command", wrap(async (req, res) => {
+ const production = await own(req), input = z.object({ message: z.string().min(3).max(1000), revision: z.number().int().nonnegative() }).parse(req.body);
+ if (!production.timeline?.length) return res.status(409).json({ error: "Complete the production rough cut before editing." });
+ res.json(await applyProductionEdit(production, input.message, input.revision));
 }));
 
 studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {

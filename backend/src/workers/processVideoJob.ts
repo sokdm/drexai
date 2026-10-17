@@ -38,7 +38,12 @@ export async function processVideoJob(jobId: string) {
     job.outputMetadata = { assetIds: assets.map((asset) => asset._id), count: assets.length };
     job.completedAt = new Date();
     await job.save();
-    if (job.reservationId) await settleReservation(String(job.reservationId));
+    if (job.reservationId) {
+      const costs = outputs.map(output => (output.metadata as any).usage?.cost);
+      const actual = costs.length && costs.every(c => typeof c === "number" && Number.isFinite(c) && c >= 0) ? costs.reduce((n, c) => n + c, 0) : undefined;
+      const settled = await settleReservation(String(job.reservationId), actual);
+      job.outputMetadata = { ...job.outputMetadata, creditsCharged: settled?.credits, providerCostUsd: actual }; await job.save();
+    }
   } catch (error) {
     job.status = "failed";
     job.error = error instanceof Error ? error.message : "Video generation failed";

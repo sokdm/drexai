@@ -14,7 +14,7 @@ export const routerId = (id: string) => id.replace(/^openrouter\//, "");
 export const providerFor = (id: string) => isOpenRouter(id) ? "openrouter" : id?.startsWith("veo-") ? "google-veo" : id === "heygen-avatar" ? "heygen" : id === "ffmpeg" ? "ffmpeg" : "gemini";
 const base = "https://openrouter.ai/api/v1/";
 export const GatewayBinding = model("GatewayBinding", new Schema({ _id: String, model: String, updatedBy: Schema.Types.ObjectId }, { timestamps: true }));
-const gatewayUsageSchema = new Schema({ model: String, userId: Schema.Types.ObjectId, requestId: String, kind: String, costUsd: Number, usage: Schema.Types.Mixed, status: String }, { timestamps: true });
+const gatewayUsageSchema = new Schema({ model: String, userId: Schema.Types.ObjectId, reservationId: { type: Schema.Types.ObjectId, index: true }, requestId: String, kind: String, costUsd: Number, usage: Schema.Types.Mixed, status: String }, { timestamps: true });
 gatewayUsageSchema.index({ requestId: 1, kind: 1 }, { unique: true, partialFilterExpression: { requestId: { $type: "string" } } });
 export const GatewayUsage = model("GatewayUsage", gatewayUsageSchema);
 const cache = new Map<string, { expires: number; value: any }>();
@@ -50,13 +50,13 @@ export async function routerResponse(endpoint: string, body?: any, timeout = 180
   }
   return response;
 }
-export async function recordRouterUsage(id: string, kind: string, data: any, userId?: string) {
+export async function recordRouterUsage(id: string, kind: string, data: any, userId?: string, reservationId?: string) {
   if (mongoose.connection.readyState !== 1) return;
-  const value = data.usage?.cost, costUsd = value !== undefined && Number.isFinite(Number(value)) ? Number(value) : undefined;
-  const requestId = data.id || data.generation_id, values = { model: id, kind, userId, ...(requestId ? { requestId } : {}), usage: data.usage || {}, costUsd, status: "completed" };
+  const value = data.usage?.cost, costUsd = (typeof value === "number" || typeof value === "string" && value.trim() !== "") && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : undefined;
+  const requestId = data.id || data.generation_id, values = { model: id, kind, userId, reservationId, ...(requestId ? { requestId } : {}), usage: data.usage || {}, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-type TextInput = { onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
+type TextInput = { reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
 export async function routerText(input: TextInput) {
  const { withProvider, assertProviderBudget } = await import("./platformControl.js");
  const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(!input.media?.length ? input.requestLimits?.fallbacks || [] : [])];
@@ -81,9 +81,9 @@ async function routerTextAttempt(input: TextInput) {
   if (inputBytes > limits.maxInputTokens) throw new Error("Input exceeds this quote's conservative text token limit. Shorten the context or obtain a new verified quote.");
   if (supported.includes("max_tokens")) body.max_tokens = Math.min(input.maxOutputTokens ?? 5000, limits.maxOutputTokens);
   if (input.schema) body.response_format = { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: geminiSchema(input.schema) } };
-  if (input.onDelta) { body.stream = true; body.stream_options = { include_usage: true }; const response = await routerResponse("chat/completions", body, 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId); return result.text; }
+  if (input.onDelta) { body.stream = true; body.stream_options = { include_usage: true }; const response = await routerResponse("chat/completions", body, 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId, input.reservationId); return result.text; }
   const response = await routerResponse("chat/completions", body, 90000), data = await response.json();
-  await recordRouterUsage(input.model, "text", data, input.userId);
+  await recordRouterUsage(input.model, "text", data, input.userId, input.reservationId);
   const result = data.choices?.[0]?.message?.content;
   if (typeof result !== "string" || !result.trim() || data.choices?.[0]?.finish_reason === "length") throw new Error("OpenRouter returned an incomplete result. Review the model output limit.");
   return result;

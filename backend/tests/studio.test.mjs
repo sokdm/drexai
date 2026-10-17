@@ -18,6 +18,8 @@ import { Wallet } from "../dist/models/Wallet.js";
 import { LedgerEntry } from "../dist/models/LedgerEntry.js";
 import { CreditReservation } from "../dist/models/CreditReservation.js";
 import { MediaAsset } from "../dist/models/MediaAsset.js";
+import { VideoEdit } from "../dist/models/VideoEdit.js";
+import { ensureProductionEdit, applyProductionEdit } from "../dist/services/sharedEditing.js";
 import { GenerationPriceRule } from "../dist/models/GenerationPriceRule.js";
 import { User } from "../dist/models/User.js";
 import { Session } from "../dist/models/Session.js";
@@ -128,6 +130,12 @@ test("multi-scene production stores correct assets, releases unused credits, and
   assert.equal(w.reservedCredits, 0); assert.equal(w.spentCredits, 14); assert.equal(w.availableCredits, 986);
   assert.equal((await AIProject.findById(f.project._id)).productionTimeline.length, 2);
   assert.ok(await StudioEvent.exists({ productionId: p._id, message: "Your video production is ready for review." }));
+  const shared = await VideoEdit.findOne({ productionId: p._id }); assert.ok(shared);
+  const changed = await applyProductionEdit(p, "Make cinematic", shared.revision); assert.equal(changed.edit.timeline.clips[0].look, "cinematic");
+  assert.equal((await ensureProductionEdit(p)).revision, changed.edit.revision);
+  await assert.rejects(applyProductionEdit(p, "Add transitions", shared.revision), /changed in the manual editor/);
+  assert.equal((await VideoEdit.findOne({ productionId: p._id })).timeline.clips[0].look, "cinematic");
+  assert.equal((await Wallet.findOne({ userId: f.userId })).spentCredits, 14);
   await runStudioProduction(String(p._id), f.providers); assert.equal(f.calls.image.length, 2);
 });
 test("duplicate and concurrent workers cannot generate or settle twice", async () => {

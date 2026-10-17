@@ -18,7 +18,7 @@ export const pricingPolicySchema = z.object({
   monthlyInfrastructureUsd: usd, requireBalanceCheck: z.boolean(),
   featurePolicies: z.record(z.object({ markup: z.number().min(1).max(100).optional(), marginPct: pct.optional(), minimumCredits: z.number().int().min(1).max(10000).optional() })).default({})
 });
-export const defaultPricingPolicy = { markup: 8, marginPct: 85, minimumCredits: 1, imageMinimumCredits: 5, paymentFeePct: 3, providerFeePct: 5, contingencyPct: 2, renderingUsd: 0, storageUsd: 0, otherUsd: 0, roundingCredits: 1, maxJobUsd: 20, userDailyUsd: 50, globalDailyUsd: 200, maxInputTokens: 20000, maxOutputTokens: 12000, lowBalanceUsd: 2, criticalBalanceUsd: 1, maxBalanceAgeMinutes: 5, monthlyInfrastructureUsd: 0, requireBalanceCheck: false, featurePolicies: {} };
+export const defaultPricingPolicy = { markup: 3, marginPct: 0, minimumCredits: 1, imageMinimumCredits: 1, paymentFeePct: 3, providerFeePct: 0, contingencyPct: 0, renderingUsd: 0, storageUsd: 0, otherUsd: 0, roundingCredits: 1, maxJobUsd: 20, userDailyUsd: 50, globalDailyUsd: 200, maxInputTokens: 20000, maxOutputTokens: 12000, lowBalanceUsd: 2, criticalBalanceUsd: 1, maxBalanceAgeMinutes: 5, monthlyInfrastructureUsd: 0, requireBalanceCheck: false, featurePolicies: {} };
 export async function getPricingPolicy() {
   const row = await PricingPolicy.findById("global").lean();
   return { revision: row?.revision || 1, values: pricingPolicySchema.parse({ ...defaultPricingPolicy, ...(row?.values || {}) }) };

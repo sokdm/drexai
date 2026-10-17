@@ -1,9 +1,10 @@
+import { measureWaveform } from "../dist/services/waveform.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { speechRanges, retainTimelineRanges } from "../dist/services/silenceEditing.js";
 import { editingCommand } from "../dist/services/editorCommands.js";
 import { timelineSchema, effectValues } from "@drex/shared";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runMedia, renderTimeline } from "../dist/services/ffmpeg.js";
@@ -36,9 +37,15 @@ test("real FFmpeg exports effects and detects silence in the mixed audiovisual o
  try {
   const file = path.join(directory, "source.mp4");
   await runMedia("ffmpeg", ["-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=4", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-af", "volume=enable='between(t,1,3)':volume=0", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", file]);
+  const measured = await measureWaveform({ sizeBytes: 10000, url: "data:video/mp4;base64," + (await readFile(file)).toString("base64") });
+  assert.ok(Math.max(...measured.peaks) > .03); assert.ok(Math.min(...measured.peaks) < .01);
   const t = timelineSchema.parse({ ...timeline, clips: [{ ...timeline.clips[0], sourceIn: 0, duration: 4, sourceAudio: true, look: "cinematic", sharpen: .5, vignette: true }], audio: [], captions: [] });
   const rendered = await renderTimeline(t, { resolution: "480p", quality: "draft", filename: "test", format: "mp4" }, new Map([["a".repeat(24), file]]), directory);
   assert.ok(Math.abs(rendered.duration - 4) < .15);
+  const fast = structuredClone(t); fast.clips[0].speed = 2; fast.clips[0].duration = 2;
+  const sped = await renderTimeline(fast, { resolution: "480p", quality: "draft", filename: "fast", format: "mp4" }, new Map([["a".repeat(24), file]]), directory);
+  assert.ok(Math.abs(sped.duration - 2) < .15);
+  await renderTimeline(t, { resolution: "480p", quality: "draft", filename: "original", format: "mp4" }, new Map([["a".repeat(24), file]]), directory);
   const log = await runMedia("ffmpeg", ["-i", rendered.file, "-vn", "-af", "silencedetect=noise=-35dB:d=0.6", "-f", "null", "-"], { includeStderr: true });
   const ranges = speechRanges(log, 4); assert.equal(ranges.length, 2);
   const cut = retainTimelineRanges(t, ranges); assert.ok(cut.clips.reduce((n, c) => n + c.duration, 0) < 3);

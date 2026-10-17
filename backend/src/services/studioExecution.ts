@@ -1,4 +1,5 @@
 import { providerFor } from "./openrouter.js";
+import { ensureProductionEdit } from "./sharedEditing.js";
 import { inspectNativeVideo } from "./nativeAudio.js";
 import { assertProviderBudget, checkGenerationUser } from "./platformControl.js";
 import { randomUUID } from "node:crypto";
@@ -170,6 +171,9 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     const timeline = makeTimeline(production.snapshot, production.settings, steps, assets);
     await checkpoint({ timeline });
     await AIProject.updateOne({ _id: production.projectId, userId: production.userId }, { $set: { latestProductionId: production._id, productionTimeline: timeline } });
+    await studioLog(production, "processing", "Saving the shared editor timeline, synchronized audio and available transcript captions.");
+    const edit = await ensureProductionEdit({ ...production.toObject(), timeline });
+    await studioLog(production, "success", `Shared editor ready at revision ${edit.revision}. Manual and Studio edits use this same saved timeline.`);
     await closeStudioReserve(String(production.reservationId), "production_complete");
     await checkpoint({ status: "completed", completedAt: new Date(), error: "" });
     await studioLog(production, "success", "Your video production is ready for review.");

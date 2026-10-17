@@ -23,6 +23,7 @@ test("dashboard uses the real wallet and refreshes administrator credits", async
   await expect(page.getByText("1500", { exact: true })).toBeVisible();
 });
 test("script generation failure stops loading and shows the backend error", async ({ page }) => {
+  page.on("dialog", dialog => dialog.accept());
   await setup(page); await page.goto("/dashboard/script-builder");
   await page.getByRole("button", { name: "Generate structured script" }).click();
   await expect(page.getByRole("alert")).toContainText("Gemini is temporarily unavailable");

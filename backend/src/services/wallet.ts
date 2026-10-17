@@ -1,6 +1,6 @@
 import { AppMigration, DailySpendBudget } from "../models/Finance.js";
 import { AdminAudit } from "../models/Admin.js";
-import { isOpenRouter } from "./openrouter.js";
+import { isOpenRouter, GatewayUsage } from "./openrouter.js";
 import { checkGenerationUser, assertProviderBudget } from "./platformControl.js";
 import { ProviderControl } from "../models/Admin.js";
 import mongoose from "mongoose";
@@ -113,20 +113,38 @@ export async function reserveCredits(userId: string, quote: any, idempotencyKey:
   return reservation;
 }
 
-export async function settleReservation(reservationId: string, providerCostUsd = 0) {
+export async function settleReservation(reservationId: string, providerCostUsd?: number) {
+  const prior = await CreditReservation.findById(reservationId);
+  if (!prior || prior.status !== "reserved") return prior;
+  if (providerCostUsd === undefined && prior.quote?.provider === "openrouter") {
+    const rows = await GatewayUsage.find({ reservationId, status: "completed" }).lean();
+    if (rows.length && rows.every(r => typeof r.costUsd === "number" && r.costUsd >= 0)) providerCostUsd = rows.reduce((n, r) => n + r.costUsd!, 0);
+  }
+  let credits = prior.credits;
+  // Reconcile only new, frozen automatic quotes with positively identified usage.
+  // Historical records and unknown costs retain their approved terms.
+  if (typeof providerCostUsd === "number" && Number.isFinite(providerCostUsd) && providerCostUsd >= 0 && prior.quote?.assumptions && prior.quote?.creditUsd) {
+    const { calculateCreditPrice } = await import("./creditPricingEngine.js");
+    credits = providerCostUsd === 0 ? 0 : Math.min(credits, calculateCreditPrice(providerCostUsd, [{ amount: Number(prior.quote.creditUsd), credits: 1 }], prior.quote.assumptions, prior.quote.quantity || 1, prior.quote.feature === "text_to_image").credits);
+  }
   const session = await mongoose.startSession();
   await session.withTransaction(async () => {
     const reservation = await CreditReservation.findById(reservationId).session(session);
     if (!reservation || reservation.status !== "reserved") return;
     const wallet = await ensureWallet(String(reservation.userId), session);
+    const released = reservation.credits - credits;
     wallet.reservedCredits -= reservation.credits;
-    wallet.spentCredits += reservation.credits;
+    wallet.spentCredits += credits;
+    wallet.availableCredits += released;
+    reservation.credits = credits;
     reservation.status = "settled";
     reservation.providerCostUsd = providerCostUsd;
     await Promise.all([wallet.save({ session }), reservation.save({ session })]);
     await LedgerEntry.create([{ userId: reservation.userId, walletId: wallet._id, type: "settlement", amountCredits: -reservation.credits, balanceAfter: wallet.availableCredits, idempotencyKey: `settle:${reservation.id}`, metadata: { providerCostUsd } }], { session });
+    if (released > 0) await LedgerEntry.create([{ userId: reservation.userId, walletId: wallet._id, type: "release", amountCredits: released, balanceAfter: wallet.availableCredits, idempotencyKey: `actual-cost-release:${reservation.id}`, metadata: { reason: "Verified actual provider cost below approved ceiling", providerCostUsd } }], { session });
   });
   await session.endSession();
+  return CreditReservation.findById(reservationId);
 }
 
 export async function releaseReservation(reservationId: string, reason = "released", outerSession?: mongoose.ClientSession) {
