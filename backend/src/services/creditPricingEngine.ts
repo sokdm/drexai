@@ -8,6 +8,8 @@ import { env } from "../config/env.js";
 
 const pct = z.number().min(0).max(95), usd = z.number().min(0).max(10000);
 export const pricingPolicySchema = z.object({
+  commercialEnabled: z.boolean().default(true),
+  commercialMaxSeconds: z.number().int().min(5).max(600).default(120),
   freeUserDailyRequests: z.number().int().min(1).max(1000).default(20), freeSharedDailyRequests: z.number().int().min(1).max(1000).default(50), freeSharedMinuteRequests: z.number().int().min(1).max(20).default(20),
   markup: z.number().min(1).max(100), marginPct: pct, minimumCredits: z.number().int().min(1).max(10000),
   imageMinimumCredits: z.number().int().min(1).max(10000), paymentFeePct: pct, providerFeePct: pct,

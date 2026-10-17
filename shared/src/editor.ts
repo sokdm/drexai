@@ -12,7 +12,7 @@ export const editorClipSchema = z.object({
   cropX: z.number().min(0).max(1).optional(),
   keyframes: z.array(z.object({ time: seconds, zoom: z.number().min(1).max(4), x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).max(100).optional(),
   look: z.enum(["original", "cinematic", "vivid", "monochrome", "warm", "cool"]).optional(),
-  brightness: z.number().min(-0.5).max(0.5).optional(), contrast: z.number().min(0.5).max(2).optional(), saturation: z.number().min(0).max(2).optional(),
+  brightness: z.preprocess(v => v === null ? undefined : v, z.number().min(-0.5).max(0.5).optional()), contrast: z.preprocess(v => v === null ? undefined : v, z.number().min(0.5).max(2).optional()), saturation: z.preprocess(v => v === null ? undefined : v, z.number().min(0).max(2).optional()),
   sharpen: z.number().min(0).max(1.5).optional(), vignette: z.boolean().optional(),
   sourceIn: seconds.default(0), duration: z.number().finite().min(0.1).max(600),
   transition: z.enum(["cut", "fade"]).default("cut"), fit: z.enum(["contain", "cover"]).default("contain"),

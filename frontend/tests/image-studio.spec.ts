@@ -31,7 +31,9 @@ for (const width of [390,1440]) test(`image studio shared canvas, billing approv
  await page.getByRole("button",{name:"AI Editor",exact:true}).click(); await expect(page.getByLabel("Reference image",{exact:true})).toHaveValue(id);
  await page.getByRole("button",{name:"Rotate image",exact:true}).click(); await expect.poll(()=>transforms.length).toBe(1); expect(generates).toHaveLength(1);
  await page.getByRole("button",{name:"Undo manual edit"}).click();
- await page.getByRole("button",{name:"BG Remover",exact:true}).click(); await expect(page.getByRole("button",{name:"Background removal unavailable"})).toBeDisabled();
+ await page.getByRole("button",{name:"BG Remover",exact:true}).click(); await expect(page.getByRole("button",{name:"AI subject cutout unavailable"})).toBeDisabled();
+ await page.route("**/remove-background",route=>{expect(route.request().postDataJSON().color).toBe("#ffffff");const asset={...assets[0],_id:"b11111111111111111111111",metadata:{tool:"background"}};assets=[asset,...assets];return route.fulfill({json:{asset}});});
+ await page.getByRole("button",{name:"Remove solid background free",exact:true}).click();await expect(page.getByText("Transparent PNG saved. No credits charged.",{exact:true})).toBeVisible();expect(generates).toHaveLength(1);
  await page.getByRole("button",{name:"Prompt Assistant",exact:true}).click(); await expect(page.getByRole("button",{name:"New conversation"})).toBeAttached();
  await page.getByRole("button",{name:"Generate",exact:true}).click();
  await expect.poll(()=>state.prompt).toBe("A beautiful cinematic city at sunset");

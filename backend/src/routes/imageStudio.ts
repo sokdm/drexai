@@ -56,3 +56,15 @@ imageStudioRouter.post("/studio/assets/:id/transform", wrap(async (req: any, res
  const output = await image.png().toBuffer();
  res.status(201).json({ asset: await store(req, output, { tool: "manual", parentAssetId: String(asset._id), operations: input, creditsCharged: 0 }, asset.projectId) });
 }));
+
+imageStudioRouter.post("/studio/assets/:id/remove-background", wrap(async (req: any, res: any) => {
+ const input = z.object({ color: z.string().regex(/^#[a-f0-9]{6}$/i), tolerance: z.number().int().min(0).max(150).default(30) }).parse(req.body);
+ const asset = await MediaAsset.findOne({ _id: id.parse(req.params.id), userId: req.user._id, type: "image", deletedAt: null });
+ if (!asset) return res.status(404).json({ error: "Image not found" });
+ if ((asset.sizeBytes || 0) > 15 * 1024 * 1024) throw new Error("Source exceeds the 15MB editor limit");
+ const source = asset.url?.startsWith("data:") ? Buffer.from(asset.url.split(",")[1], "base64") : (await readMediaObject(asset.key))?.buffer;
+ if (!source) throw new Error("Source unavailable");
+ const { removeSolidBackground } = await import("../services/backgroundRemoval.js");
+ const result = await removeSolidBackground(source, input.color, input.tolerance);
+ res.status(201).json({ asset: await store(req, result.buffer, { tool: "background", parentAssetId: String(asset._id), method: "border-connected-solid-color", removedPixels: result.removedPixels, creditsCharged: 0 }, asset.projectId) });
+}));

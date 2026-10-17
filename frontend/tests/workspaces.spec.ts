@@ -14,6 +14,20 @@ const config = {
   readiness: { queueEnabled: true, storageConfigured: true, providerConfigured: true, workerOnline: true }
 };
 
+test("product commercial uploads a reference and requires a script quote before generation", async ({ page }) => {
+ const { requests } = await mockApi(page); let generated: any = null;
+ await page.route("**/api/images/studio/upload", route => route.fulfill({json:{asset:{_id:"c11111111111111111111111",type:"image"}}}));
+ await page.route("**/api/ai/scripts/quote", route => { const body=route.request().postDataJSON(); expect(body.settings.product.name).toBe("Original coffee maker");expect(body.settings.sceneCount).toBe(6); return route.fulfill({json:{quote:{allowed:true,credits:3}}}); });
+ await page.route("**/api/ai/scripts/generate", route => { generated=route.request().postDataJSON();return route.fulfill({status:202,json:{job:{_id:"d11111111111111111111111",status:"queued",logs:[]}}}); });
+ await page.route("**/api/ai/scripts/jobs/*", route => route.fulfill({json:{job:{_id:"d11111111111111111111111",status:"completed",projectId,logs:[{stage:"saving",message:"Saved commercial script"}]},project}}));
+ await page.goto("/dashboard/ai-studio");await page.getByRole("button",{name:"Product Commercials",exact:true}).click();
+ await page.getByLabel("Product name",{exact:true}).fill("Original coffee maker");await page.getByLabel("Verified product benefits").fill("Easy to clean");
+ await page.getByLabel("Product image",{exact:true}).setInputFiles({name:"Product.png",mimeType:"image/png",buffer:await readFile(new URL("../public/assets/drex-ai-references.png",import.meta.url))});
+ await page.getByRole("button",{name:"Review script cost",exact:true}).click();expect(generated).toBeNull();
+ await page.getByRole("button",{name:"Approve 3 credits for script",exact:true}).click();await expect.poll(()=>generated?.approvedCredits).toBe(3);
+ await expect(page.getByRole("link",{name:"Review commercial scenes and continue to production"})).toBeVisible();expect(requests.some(r=>r.includes("/images/generate"))).toBe(false);
+});
+
 async function mockApi(page: Page, completed = false) {
   const niches: any[] = [];
   const requests: string[] = [];
@@ -29,7 +43,9 @@ async function mockApi(page: Page, completed = false) {
     requests.push(`${method} ${path}`);
     if (method === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": request.headers().origin || "http://localhost:5173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type,x-csrf-token", "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE" } });
     let data: any = {};
-    if (path === "/api/auth/me") data = { user: { id: "test", displayName: "Studio Tester", email: "tester@example.test", emailVerified: true, status: "active", onboarding: { completed: true } } };
+    if (path === "/api/studio/asset-packs") data = { packs: [], assets: [] };
+    else if (path === "/api/ai/agent/conversations") data = { conversations: [] };
+    else if (path === "/api/auth/me") data = { user: { id: "test", displayName: "Studio Tester", email: "tester@example.test", emailVerified: true, status: "active", onboarding: { completed: true } } };
     else if (path === "/api/publishing/dashboard") data = { exports: [], projects: [], drafts: [], account: null, history: [], platforms: [{ id: "youtube", label: "YouTube", mode: "oauth", ratio: "16:9" }] };
     else if (path === "/api/editor/config") data = { productions: [], edits: [] };
     else if (path === "/api/editor/edits") data = { edit };

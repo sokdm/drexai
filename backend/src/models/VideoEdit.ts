@@ -3,7 +3,7 @@ import { Schema, model } from "mongoose";
 const editSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, required: true, index: true }, projectId: { type: Schema.Types.ObjectId, required: true, index: true },
   productionId: { type: Schema.Types.ObjectId, required: true }, title: { type: String, required: true },
-  timeline: { type: Schema.Types.Mixed, required: true }, revision: { type: Number, default: 0 },
+  timeline: { type: Schema.Types.Mixed, required: true, set: (value: any) => value == null ? value : JSON.parse(JSON.stringify(value)) }, revision: { type: Number, default: 0 },
 }, { timestamps: true });
 editSchema.index({ userId: 1, productionId: 1 }, { unique: true });
 export const VideoEdit = model("VideoEdit", editSchema);

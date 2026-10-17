@@ -125,7 +125,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           }
           step.status = "requesting"; step.error = undefined;
           await checkpoint();
-          await studioLog(production, "processing", `${step.label}: ${step.providerJobId ? "resuming provider operation" : "generation submitted"}`, step.key);
+          await studioLog(production, "processing", `${step.label}: ${step.providerJobId ? "resuming provider operation" : "generation submitted"} / billable, approved ceiling ${step.credits} credits`, step.key);
           if (step.kind === "image") {
             const outputs = await providers.image(input); output = outputs[0];
           } else if (step.kind === "audio") {
@@ -171,7 +171,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     const timeline = makeTimeline(production.snapshot, production.settings, steps, assets);
     await checkpoint({ timeline });
     await AIProject.updateOne({ _id: production.projectId, userId: production.userId }, { $set: { latestProductionId: production._id, productionTimeline: timeline } });
-    await studioLog(production, "processing", "Saving the shared editor timeline, synchronized audio and available transcript captions.");
+    await studioLog(production, "processing", "Free editing: saving the shared editor timeline, synchronized audio and available transcript captions.");
     const edit = await ensureProductionEdit({ ...production.toObject(), timeline });
     await studioLog(production, "success", `Shared editor ready at revision ${edit.revision}. Manual and Studio edits use this same saved timeline.`);
     await closeStudioReserve(String(production.reservationId), "production_complete");

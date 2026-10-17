@@ -87,3 +87,16 @@ test("free research accepts zero-credit approval, executes tools and preserves t
  assert.equal(response.status,200);assert.match(await response.text(),/event: done/);
  assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
 });
+
+test("Director lists licensed packs and applies a permitted preset to the same shared edit",async()=>{
+ const {AssetPack}=await import("../dist/routes/assetPacks.js");
+ const production=await StudioProduction.findOne({userId:user._id});const existing=await VideoEdit.findOne({productionId:production._id});
+ const pack=await AssetPack.create({name:"Warm brand",kind:"effect",license:"Original brand configuration",active:true,preset:{look:"warm"},createdBy:user._id});
+ plannedTools=[{name:"list_asset_packs",query:"licensed presets"},{name:"apply_asset_pack",query:String(pack._id)}];
+ try {
+  const payload={message:"Apply the warm brand preset",productionId:String(production._id),allowTimelineEdits:true};
+  const quoted=await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)});const {quote}=await quoted.json();
+  const response=await original(base+"/agent/chat",{method:"POST",headers,body:JSON.stringify({...payload,approvedCredits:quote.credits})});assert.match(await response.text(),/event: done/);
+  const saved=await VideoEdit.findById(existing._id);assert.equal(saved.timeline.clips[0].look,"warm",JSON.stringify((await AIConversation.findOne({userId:user._id}).sort({createdAt:-1})).messages.at(-1).metadata));assert.equal(saved.revision,existing.revision+1);assert.equal(await VideoEdit.countDocuments({productionId:production._id}),1);
+ } finally {plannedTools=[];}
+});

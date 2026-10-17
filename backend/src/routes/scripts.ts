@@ -15,6 +15,13 @@ const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(
 const id = z.string().regex(/^[a-f0-9]{24}$/i);
 const inputSchema = z.object({ settings: scriptSettings, projectId: id.optional(), message: z.string().trim().min(2).max(2000).optional() });
 async function normalize(userId: any, input: any) {
+ if (input.settings.product) {
+  const product = input.settings.product;
+  if (await MediaAsset.countDocuments({ _id: { $in: product.assetIds }, userId, type: "image", deletedAt: null }) !== new Set(product.assetIds).size) throw new Error("Choose your own available product images");
+  const { values } = await (await import("../services/creditPricingEngine.js")).getPricingPolicy();
+  if (!values.commercialEnabled) throw new Error("Product commercials are disabled by the administrator");
+  if (scriptShape(input.settings).seconds > values.commercialMaxSeconds) throw new Error("Commercial duration exceeds the administrator's configured limit");
+ }
  if (!input.projectId) return input;
  const project = await AIProject.findOne({ _id: input.projectId, userId });
  if (!project) throw new Error("Project not found");
@@ -25,7 +32,7 @@ async function normalize(userId: any, input: any) {
  return { ...input, settings: { ...input.settings, sceneCount: Math.max(1,count), ...(longer ? { targetDuration: Math.min(30, original.seconds / 60 * 1.5) + " minutes" } : {}) } };
 }
 async function terms(input: any) {
- const model = await defaultModel("story_generation", await defaultModel("text", "openrouter/" + env.OPENROUTER_TEXT_MODEL));
+ const model = await (await import("../services/assistantRouting.js")).assistantModel("story_generation", input.settings.modelMode);
  if (!model.startsWith("openrouter/")) throw new Error("Select an OpenRouter model for Story generation in Admin / Providers. Script Builder no longer submits direct-provider requests.");
  return createQuote({ feature: "story_generation", provider: "openrouter", model, quantity: scriptShape(input.settings).calls });
 }

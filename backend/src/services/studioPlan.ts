@@ -28,7 +28,7 @@ export type StudioStep = {
   credits: number; pricing?: Record<string, any>; assetId?: string; providerJobId?: string;
   stored?: Record<string, any>; error?: string; charged?: boolean; reused?: boolean; failedProviderJobIds?: string[];
 };
-export type StudioSnapshot = { title: string; scenes: any[]; characters: any[]; niche?: any; summary?: string };
+export type StudioSnapshot = { title: string; scenes: any[]; characters: any[]; niche?: any; summary?: string; product?: { name: string; benefits: string; assetIds: string[] } };
 
 export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSettings): StudioStep[] {
   const scenes = [...snapshot.scenes].sort((a, b) => a.order - b.order);
@@ -42,8 +42,9 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
   for (const scene of scenes) {
     if (!scene.approved || !scene._id || !Number.isInteger(scene.order) || !scene.imagePrompt?.trim()) throw new Error("Every scene needs approval, a unique order, and an image prompt");
     const characters = snapshot.characters.filter(c => (scene.characters ?? []).includes(c.name));
-    const prompt = [scene.imagePrompt, ...characters.map(c => `Character ${c.name}: ${c.appearance ?? ""}; clothing: ${c.clothing ?? ""}; personality: ${c.personality ?? ""}`)].join("\n");
-    const refs = imageModels.find(m => m.id === settings.imageModel)?.characterReference ? characters.map(c => c.referenceAssetId).filter(Boolean) : [];
+    const prompt = [scene.imagePrompt, ...(snapshot.product ? [`Use the supplied real product references. Preserve the shape, label and packaging of ${snapshot.product.name}. Do not invent claims. Benefits from the brief: ${snapshot.product.benefits}`] : []), ...characters.map(c => `Character ${c.name}: ${c.appearance ?? ""}; clothing: ${c.clothing ?? ""}; personality: ${c.personality ?? ""}`)].join("\n");
+    if (snapshot.product && !imageModels.find(m => m.id === settings.imageModel)?.characterReference) throw new Error("Product commercials require an image model with reference support");
+    const refs = imageModels.find(m => m.id === settings.imageModel)?.characterReference ? [...new Set([...(snapshot.product?.assetIds || []), ...characters.map(c => c.referenceAssetId).filter(Boolean)])].slice(0,4) : [];
     add(scene, "image", "", validateImageSettings({ prompt, stylePreset: snapshot.niche?.visualStyle ?? "Cinematic", model: settings.imageModel, aspectRatio: settings.aspectRatio, resolution: settings.resolution, numberOfImages: 1, characterReferenceIds: refs }), "image");
   }
   if (settings.narration) for (const scene of scenes) {

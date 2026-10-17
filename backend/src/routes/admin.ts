@@ -1,3 +1,4 @@
+import { assetPackRouter } from "./assetPacks.js";
 import { adminOperationsRouter } from "./adminOperations.js";
 import { GatewayBinding, GatewayUsage, isOpenRouter, providerFor, verifiedRouterModel } from "../services/openrouter.js";
 import { routerAdminCatalog, routerPricing } from "../services/openrouterAdmin.js";
@@ -71,6 +72,7 @@ adminRouter.post("/login", rateLimit({ windowMs: 15 * 60000, limit: 8, standardH
   res.cookie("drex_admin", token, { httpOnly: true, sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/api" }); res.cookie("drex_admin_csrf", csrf, { sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/" }); res.json({ user: { id: user._id, displayName: user.displayName, email: user.email }, csrf });
 }));
 adminRouter.use(requireAdmin);
+adminRouter.use(assetPackRouter);
 adminRouter.get("/me", (req: any, res) => res.json({ user: req.adminUser }));
 adminRouter.post("/logout", wrap(async (req: any, res: any) => { await AdminSession.updateOne({ _id: req.adminSession._id }, { revokedAt: new Date() }); res.clearCookie("drex_admin", { path: "/api" }); res.clearCookie("drex_admin_csrf", { path: "/" }); res.json({ ok: true }); }));
 adminRouter.get("/overview", wrap(async (req: any, res: any) => { const input = z.object({ start: z.string().date(), end: z.string().date() }).parse(req.query); const start = new Date(input.start), end = new Date(`${input.end}T23:59:59.999Z`); if (end < start || end.getTime() - start.getTime() > 366 * 86400000) return res.status(400).json({ error: "Choose a date range of up to one year." }); res.json(await overview(start, end)); }));

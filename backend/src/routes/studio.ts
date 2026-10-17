@@ -1,3 +1,4 @@
+import { assetPackRouter } from "./assetPacks.js";
 import { configuredModels } from "../services/platformControl.js";
 import { ensureProductionEdit, applyProductionEdit } from "../services/sharedEditing.js";
 import { Router, Request, Response, NextFunction } from "express";
@@ -24,6 +25,7 @@ import { studioLog } from "../services/studioExecution.js";
 
 export const studioRouter = Router();
 studioRouter.use(requireAuth, requireCsrf, rateLimit({ windowMs: 60000, limit: 120, standardHeaders: true, legacyHeaders: false }));
+studioRouter.use(assetPackRouter);
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i, "Invalid ID");
 const wrap = (fn: (req: Request, res: Response) => Promise<any>) => (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
 function fail(message: string, statusCode = 400): never { throw Object.assign(new Error(message), { statusCode }); }
@@ -39,7 +41,7 @@ async function readiness() {
 studioRouter.get("/config", wrap(async (req, res) => {
   const projects = await AIProject.find({ userId: req.user._id }).sort({ updatedAt: -1 }).limit(100).lean();
   const characters = await CharacterProfile.find({ userId: req.user._id }).lean();
-  res.json({ imageModels: await configuredModels("image", imageModels), videoModels: await configuredModels("video", videoModels), voiceModels: await configuredModels("voice", ttsModels), projects, characters, readiness: await readiness() });
+  res.json({ commercialEnabled: (await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled, imageModels: await configuredModels("image", imageModels), videoModels: await configuredModels("video", videoModels), voiceModels: await configuredModels("voice", ttsModels), projects, characters, readiness: await readiness() });
 }));
 studioRouter.get("/productions", wrap(async (req, res) => {
   const query: any = { userId: req.user._id };
@@ -58,13 +60,18 @@ studioRouter.post("/plans", wrap(async (req, res) => {
     refs.push({ ...character, referenceAssetId: reference ? String(reference._id) : undefined });
   }
   const niche = project!.nicheId ? await Niche.findOne({ _id: project!.nicheId, userId: req.user._id }).lean() : null;
-  let snapshot: any = JSON.parse(JSON.stringify({ title: project!.title, summary: project!.summary, scenes: project!.scenes, characters: refs, niche }));
+  let snapshot: any = JSON.parse(JSON.stringify({ title: project!.title, summary: project!.summary, scenes: project!.scenes, characters: refs, niche, product: (project!.prompts as any)?.sourceSettings?.product }));
   let settings = input.settings;
   let source: any;
   if (input.sourceProductionId) {
     source = await StudioProduction.findOne({ _id: input.sourceProductionId, userId: req.user._id, projectId: input.projectId });
     if (!source || !["completed", "cancelled", "failed", "needs_review", "paused"].includes(source.status) || source.leaseUntil > new Date()) fail("Pause production before regenerating an output");
     snapshot = source.snapshot; settings = studioSettingsSchema.parse(source.settings);
+  }
+  if (snapshot.product) {
+    if (!(await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled) fail("Product commercials are disabled by the administrator");
+    const ids = snapshot.product.assetIds || [];
+    if (await MediaAsset.countDocuments({ _id: { $in: ids }, userId: req.user._id, type: "image", deletedAt: null }) !== new Set(ids).size) fail("Product reference images are unavailable");
   }
   const steps = buildStudioSteps(snapshot, settings);
   if (source) {
@@ -104,6 +111,7 @@ studioRouter.post("/productions/:id/edit-command", wrap(async (req, res) => {
 
 studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {
   const production = await own(req);
+  if ((production.snapshot as any)?.product && !(await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled) fail("Product commercials are disabled by the administrator");
   const { maxCredits } = z.object({ maxCredits: z.number().int().nonnegative().max(1000000) }).parse(req.body);
   if (production.status !== "draft") {
     if (production.approvedAt) return res.json({ production });
