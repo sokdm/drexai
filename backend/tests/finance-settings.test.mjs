@@ -48,8 +48,8 @@ test("requested packages migrate legacy prices once and preserve later admin edi
 });
 test("decimal pricing uses cheapest package, protects margin and scales image quantity", () => {
  const packages = [{ amount: 10, credits: 500 }, { amount: 20, credits: 1000 }, { amount: 90, credits: 5000 }];
- const low = calculateCreditPrice("0.01", packages, defaultPricingPolicy, 1, true); assert.equal(low.credits, 2); assert.equal(low.creditUsd, "0.018");
- assert.equal(calculateCreditPrice("0.02", packages, defaultPricingPolicy, 2, true).credits, 4);
+ const low = calculateCreditPrice("0.01", packages, defaultPricingPolicy, 1, true); assert.equal(low.credits, 5); assert.equal(low.creditUsd, "0.018");
+ assert.equal(calculateCreditPrice("0.02", packages, defaultPricingPolicy, 2, true).credits, 10);
  const expensive = calculateCreditPrice("0.04", packages, defaultPricingPolicy, 1, true); assert.equal(expensive.credits, 7); assert.ok(Number(expensive.estimatedMarginPct) >= 66);
  assert.throws(() => calculateCreditPrice("NaN", packages, defaultPricingPolicy), /positive verified/);
  assert.throws(() => calculateCreditPrice("1", [], defaultPricingPolicy), /active USD/);

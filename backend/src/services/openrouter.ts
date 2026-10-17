@@ -96,11 +96,13 @@ export async function routerImages(settings: any) {
   for (let index = 0; index < settings.numberOfImages; index++) {
     const body: any = { model: routerId(settings.model), prompt: `${settings.prompt}\nStyle: ${settings.stylePreset || "natural"}`, resolution: settings.resolution, aspect_ratio: settings.aspectRatio };
     if (refs.length) body.input_references = refs.map((image: any) => ({ type: "image_url", image_url: { url: `data:${image.contentType};base64,${image.data}` } }));
+    if (settings.background) { checkCapability(record, "background", settings.background); body.background = settings.background; }
     const response = await routerResponse("images", body), data = await response.json();
     await recordRouterUsage(settings.model, "image", data, settings.userId);
     if (!data.data?.[0]?.b64_json) throw new Error("OpenRouter returned no image bytes");
     const buffer = Buffer.from(data.data[0].b64_json, "base64"), meta = await sharp(buffer, { limitInputPixels: 40000000 }).metadata();
     if (!["png", "jpeg", "webp"].includes(meta.format || "")) throw new Error("OpenRouter returned an unsupported image format");
+    if (settings.background === "transparent" && (!meta.hasAlpha || (await sharp(buffer).stats()).isOpaque)) throw new Error("The provider did not return a transparent image. Background removal could not be confirmed.");
     // Normalize raster outputs for existing asset and recovery paths.
     outputs.push({ buffer: await sharp(buffer).png().toBuffer(), contentType: "image/png", providerData: { usage: data.usage, gateway: "openrouter" } });
   }

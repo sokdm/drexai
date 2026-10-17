@@ -25,7 +25,7 @@ export function validateImageSettings(input: any) {
   if (!model.resolutions.includes(input.resolution)) throw new Error("Unsupported resolution for selected model");
   const count = Number(input.numberOfImages ?? 1);
   if (count < 1 || count > model.maxImages) throw new Error(`Selected model supports 1-${model.maxImages} images per request`);
-  if (input.characterReferenceIds?.length && !model.characterReference) throw new Error("Selected model does not support character references");
+  if ((input.characterReferenceIds?.length || input.sourceAssetIds?.length) && !model.characterReference) throw new Error("Selected model does not support character references");
   if (!String(input.prompt ?? "").trim()) throw new Error("Prompt is required");
   return { ...input, model: model.id, numberOfImages: count };
 }

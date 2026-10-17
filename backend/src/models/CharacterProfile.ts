@@ -8,7 +8,8 @@ const characterProfileSchema = new Schema({
   clothing: String,
   personality: String,
   voicePreference: String,
-  referenceImageUrl: String
+  referenceImageUrl: String,
+  referenceAssetId: { type: Schema.Types.ObjectId, ref: "MediaAsset" }
 }, { timestamps: true });
 
 export const CharacterProfile = model("CharacterProfile", characterProfileSchema);

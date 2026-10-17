@@ -18,7 +18,7 @@ export const pricingPolicySchema = z.object({
   monthlyInfrastructureUsd: usd, requireBalanceCheck: z.boolean(),
   featurePolicies: z.record(z.object({ markup: z.number().min(1).max(100).optional(), marginPct: pct.optional(), minimumCredits: z.number().int().min(1).max(10000).optional() })).default({})
 });
-export const defaultPricingPolicy = { markup: 3, marginPct: 0, minimumCredits: 1, imageMinimumCredits: 1, paymentFeePct: 3, providerFeePct: 0, contingencyPct: 0, renderingUsd: 0, storageUsd: 0, otherUsd: 0, roundingCredits: 1, maxJobUsd: 20, userDailyUsd: 50, globalDailyUsd: 200, maxInputTokens: 20000, maxOutputTokens: 12000, lowBalanceUsd: 2, criticalBalanceUsd: 1, maxBalanceAgeMinutes: 5, monthlyInfrastructureUsd: 0, requireBalanceCheck: false, featurePolicies: {} };
+export const defaultPricingPolicy = { markup: 3, marginPct: 0, minimumCredits: 1, imageMinimumCredits: 5, paymentFeePct: 3, providerFeePct: 0, contingencyPct: 0, renderingUsd: 0, storageUsd: 0, otherUsd: 0, roundingCredits: 1, maxJobUsd: 20, userDailyUsd: 50, globalDailyUsd: 200, maxInputTokens: 20000, maxOutputTokens: 12000, lowBalanceUsd: 2, criticalBalanceUsd: 1, maxBalanceAgeMinutes: 5, monthlyInfrastructureUsd: 0, requireBalanceCheck: false, featurePolicies: {} };
 export async function getPricingPolicy() {
   const row = await PricingPolicy.findById("global").lean();
   return { revision: row?.revision || 1, values: pricingPolicySchema.parse({ ...defaultPricingPolicy, ...(row?.values || {}) }) };
@@ -67,7 +67,7 @@ export async function estimateRouterCost(input: any, policy: any) {
       const relevant = lines.filter((line: any) => !line.variant || String(line.variant).toUpperCase() === resolution.toUpperCase());
       if (!relevant.length || relevant.some((line: any) => line.unit !== "image" || !["output_image", "input_image", "input_reference"].includes(line.billable))) throw new Error("Image token/megapixel pricing requires a verified bounded override");
       if (!relevant.some((line: any) => line.billable === "output_image")) throw new Error("No verified output-image rate for this resolution");
-      let cost = new Decimal(0); for (const line of relevant) cost = cost.plus(new Decimal(line.cost_usd).mul(line.billable === "output_image" ? 1 : settings.characterReferenceIds?.length || settings.referenceImages?.length || 0));
+      let cost = new Decimal(0); for (const line of relevant) cost = cost.plus(new Decimal(line.cost_usd).mul(line.billable === "output_image" ? 1 : (settings.characterReferenceIds?.length || 0) + (settings.sourceAssetIds?.length || 0) || settings.referenceImages?.length || 0));
       costs.push(cost);
     }
     return { cost: Decimal.max(...costs).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits };
@@ -89,7 +89,9 @@ export async function quoteAutomaticCredits(input: any) {
     if (input.feature !== "text_to_image" || !input.model.startsWith("openrouter/google/") || !/token\/megapixel/.test(error.message)) throw error;
     const model = "openrouter/black-forest-labs/flux-3-image-klein", record = await verifiedRouterModel(model, "image");
     checkCapability(record, "resolution", input.settings?.resolution || input.unit.split(":")[1]); checkCapability(record, "aspect_ratio", input.settings?.aspectRatio || "16:9");
-    if (input.settings?.characterReferenceIds?.length) checkCapability(record, "input_references", input.settings.characterReferenceIds.length);
+    const referenceCount = (input.settings?.characterReferenceIds?.length || 0) + (input.settings?.sourceAssetIds?.length || 0);
+    if (referenceCount) checkCapability(record, "input_references", referenceCount);
+    if (input.settings?.background) checkCapability(record, "background", input.settings.background);
     input = { ...input, requestedModel: input.model, model };
     estimate = await estimateRouterCost(input, values);
   }

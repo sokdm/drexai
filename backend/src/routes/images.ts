@@ -18,9 +18,12 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { openMediaStream } from "../services/mediaStorage.js";
 import { emitImageJob } from "../realtime.js";
+import { imageReferences } from "../services/imageReferences.js";
+import { imageStudioRouter } from "./imageStudio.js";
 
 export const imagesRouter = Router();
 imagesRouter.use(requireAuth, requireCsrf);
+imagesRouter.use(imageStudioRouter);
 
 const requestSchema = z.object({
   prompt: z.string().min(3).max(4000),
@@ -29,8 +32,12 @@ const requestSchema = z.object({
   aspectRatio: z.string(),
   resolution: z.string(),
   numberOfImages: z.number().int().min(1).max(10),
-  characterReferenceIds: z.array(z.string()).default([]),
-  projectId: z.string().optional(),
+  characterReferenceIds: z.array(z.string().regex(/^[a-f0-9]{24}$/i)).max(4).default([]),
+  projectId: z.string().regex(/^[a-f0-9]{24}$/i).optional(),
+  sourceAssetIds: z.array(z.string().regex(/^[a-f0-9]{24}$/i)).max(4).default([]),
+  tool: z.enum(["generate", "editor", "characters", "variations", "product", "thumbnail", "batch", "style", "background"]).default("generate"),
+  background: z.literal("transparent").optional(),
+  requestId: z.string().uuid().optional(),
   approvedCredits: z.number().optional()
 });
 
@@ -42,6 +49,7 @@ imagesRouter.get("/config", async (req, res) => {
 imagesRouter.post("/quote", async (req, res, next) => {
   try {
     const settings = validateImageSettings(requestSchema.partial({ approvedCredits: true }).parse(req.body));
+    await imageReferences(req.user._id, settings);
     res.json({ quote: { ...(await rememberQuote(req.user._id, settings, await managedPrice("text_to_image", providerFor(settings.model), settings, imageCreditCost(settings)))), settings } });
   } catch (error) {
     next(error);
@@ -52,16 +60,19 @@ imagesRouter.post("/generate", async (req, res, next) => {
   let job: any, reservation: any;
   try {
     const settings = validateImageSettings(requestSchema.parse(req.body));
+    if (settings.requestId) { const existing = await ImageGenerationJob.findOne({ userId: req.user._id, requestId: settings.requestId }); if (existing) return res.status(202).json({ job: existing }); }
+    await imageReferences(req.user._id, settings);
     const terms = await approvedTerms(req.user._id, settings, settings.approvedCredits, () => managedPrice("text_to_image", providerFor(settings.model), settings, imageCreditCost(settings)));
     const credits = terms.credits;
     if (settings.approvedCredits !== credits) return res.status(400).json({ error: `Approve ${credits} credits before generating.` });
 
-    reservation = await reserveCredits(String(req.user._id), terms, `image:${req.user._id}:${Date.now()}:${settings.prompt.slice(0, 24)}`);
+    reservation = await reserveCredits(String(req.user._id), terms, `image:${req.user._id}:${settings.requestId || Date.now() + ":" + settings.prompt.slice(0, 24)}`);
     job = await ImageGenerationJob.create({ ...settings, model: terms.model || settings.model, userId: req.user._id, reservationId: reservation?._id, provider: providerFor(terms.model || settings.model), status: "queued", approvedCredits: credits });
     emitImageJob(String(job._id), { status: job.status, job });
     await dispatchGeneration("image", String(job._id));
     res.status(202).json({ job });
   } catch (error) {
+    if ((error as any)?.code === 11000 && req.body.requestId) { const existing = await ImageGenerationJob.findOne({ userId: req.user._id, requestId: req.body.requestId }); if (existing) return res.status(202).json({ job: existing }); }
     const failed = job ? await ImageGenerationJob.findOneAndUpdate({ _id: job._id, status: "queued" }, { status: "failed", error: "Queue submission failed. Reserved credits released." }) : null;
     if (reservation && (!job || failed)) await releaseReservation(String(reservation._id), "queue_submission_failed");
     if (job && !failed) return res.status(202).json({ job: await ImageGenerationJob.findById(job._id) });
@@ -71,8 +82,8 @@ imagesRouter.post("/generate", async (req, res, next) => {
 
 imagesRouter.get("/jobs", async (req, res) => {
   const jobs = await ImageGenerationJob.find({ userId: req.user._id }).sort({ createdAt: -1 }).limit(50);
-  const assets = await MediaAsset.find({ userId: req.user._id, type: "image", provider: { $ne: "upload" }, deletedAt: null }).sort({ createdAt: -1 }).limit(100);
-  res.json({ jobs, assets });
+  const assets = await MediaAsset.find({ userId: req.user._id, type: "image", deletedAt: null }).sort({ createdAt: -1 }).limit(100);
+  res.json({ jobs, assets: await Promise.all(assets.map(async asset => ({ ...asset.toObject(), url: asset.url?.startsWith("data:") ? asset.url : await signedImageUrl(asset.key) || asset.url }))) });
 });
 
 imagesRouter.get("/jobs/:id", async (req, res) => {

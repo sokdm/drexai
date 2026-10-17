@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { randomToken } from "../utils/crypto.js";
 import { ApprovedQuote, ProviderControl } from "../models/Admin.js";
 import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
-export function fingerprint(value: any): string { const clean = (v: any): any => Array.isArray(v) ? v.map(clean) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).filter(k => k !== "approvedCredits").sort().map(k => [k, clean(v[k])])) : v; return createHash("sha256").update(JSON.stringify(clean(value))).digest("hex"); }
+export function fingerprint(value: any): string { const clean = (v: any): any => Array.isArray(v) ? v.map(clean) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).filter(k => k !== "approvedCredits" && k !== "requestId").sort().map(k => [k, clean(v[k])])) : v; return createHash("sha256").update(JSON.stringify(clean(value))).digest("hex"); }
 export async function managedPrice(feature: string, provider: string, settings: any, fallback: number) {
   const unit = feature === "text_to_image" ? `image:${settings.resolution}` : feature === "image_to_video" ? `second:${settings.quality}` : "character";
   const quantity = feature === "text_to_image" ? settings.numberOfImages : feature === "image_to_video" ? settings.quantity * settings.durationSeconds : settings.mode === "multi" ? settings.speakers.map((s: any) => s.text).join(" ").length : settings.text.length;
