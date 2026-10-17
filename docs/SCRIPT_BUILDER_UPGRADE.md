@@ -36,3 +36,7 @@ Provider quality and latency, live Render restart behavior and real paid duratio
 ### Incomplete-output correction
 
 The worker previously hardcoded 5,000 tokens despite quotes allowing 12,000, and the non-streamed gateway ignored the worker's 180-second timeout. Both paths now honor their approved settings. Script requests ask for low reasoning effort only when the catalog lists reasoning support; technical prompt fields are kept concise. Incomplete responses preserve the actual finish reason, reported usage and request ID in job diagnostics. No extra paid retry is added. Existing frozen quote ceilings, completed checkpoints and historical wallet records are unchanged.
+
+### Scene completeness correction
+
+Writing batches now request required named scene fields instead of an unconstrained scene array. Planning schemas specify the exact requested scene count. Complete legacy arrays with matching scene orders remain readable; missing scenes produce a field-specific error without inventing scenes, overwriting saved batches, or submitting an extra paid call. Spoken-duration checks count structured dialogue lines when present. Provider adherence still depends on the selected model; malformed responses fail explicitly.

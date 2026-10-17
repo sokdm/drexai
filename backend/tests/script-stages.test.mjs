@@ -1,9 +1,10 @@
+import { geminiSchema } from "../dist/services/geminiSchema.js";
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
-import { processScriptJob, scriptShape } from "../dist/services/scriptProduction.js";
+import { processScriptJob, scriptShape, scriptBatchSchema } from "../dist/services/scriptProduction.js";
 import { ScriptJob } from "../dist/models/ScriptJob.js";
 import { AIProject } from "../dist/models/AIProject.js";
 import { MediaAsset } from "../dist/models/MediaAsset.js";
@@ -16,10 +17,10 @@ after(async()=>{await mongoose.disconnect();await db.stop();});
 const settings={storyTopic:"An original underwater discovery",type:"Animated story",language:"English",targetDuration:"8 minutes",visualStyle:"Cinematic"};
 function scene(order){return{order,title:`Scene ${order}`,sceneDescription:"An original scene",characters:[],narration:Array(70).fill("story").join(" "),dialogue:"",imagePrompt:"Underwater ruins",videoMotionPrompt:"Slow tracking shot",cameraDirection:"Wide angle",estimatedNarrationTiming:"30 seconds",audioSuggestions:"Ocean ambience",transitionSuggestions:"Cut"};}
 async function job(extra={}){const quote={credits:9,feature:"story_generation",provider:"fixture",model:"openrouter/fixture/script"};const reservation=await reserveCredits(String(user._id),quote,`fixture:${Math.random()}`);return ScriptJob.create({userId:user._id,requestId:crypto.randomUUID(),status:"processing",reservationId:reservation._id,quote,input:{settings},...extra});}
-function mock(failAt=0){let call=0;return async input=>{call++;assert.equal(input.timeoutMs,180000);assert.equal(input.model,"openrouter/fixture/script");if(call===failAt)throw new Error("The operation was aborted due to timeout");if(call===1)return JSON.stringify({title:"The Hidden City",storyConcept:"Discovery",summary:"A complete arc",characters:[],scenes:Array.from({length:16},(_,i)=>({title:`Scene ${i+1}`,purpose:"Develop plot",duration:30}))});const data=JSON.parse(input.prompt);return JSON.stringify({scenes:data.scenes.map((_,i)=>scene(data.startOrder+i))});};}
+function mock(failAt=0){let call=0;return async input=>{call++;assert.equal(input.timeoutMs,180000);assert.equal(input.model,"openrouter/fixture/script");if(call===failAt)throw new Error("The operation was aborted due to timeout");if(call===1)return JSON.stringify({title:"The Hidden City",storyConcept:"Discovery",summary:"A complete arc",characters:[],scenes:Array.from({length:16},(_,i)=>({title:`Scene ${i+1}`,purpose:"Develop plot",duration:30}))});const data=JSON.parse(input.prompt);return JSON.stringify(Object.fromEntries(data.requiredSceneKeys.map((key,i)=>[key,scene(data.startOrder+i)])));};}
 test("eight-minute generation uses bounded batches and saves a developed script without image calls",async()=>{assert.deepEqual(scriptShape(settings),{seconds:480,scenes:16,calls:9});const j=await job();await processScriptJob(j,mock());const saved=await ScriptJob.findById(j._id);assert.equal(saved.status,"completed");const project=await AIProject.findById(saved.projectId);assert.equal(project.scenes.length,16);assert.equal(project.scenes.reduce((n,s)=>n+s.estimatedDurationSeconds,0),480);assert.equal(await MediaAsset.countDocuments(),0);assert.ok(saved.logs.some(l=>l.stage==="prompts"));});
 test("provider timeout preserves completed batches and requires review instead of repeating uncertain paid work",async()=>{const j=await job();await processScriptJob(j,mock(3));const saved=await ScriptJob.findById(j._id);assert.equal(saved.status,"needs_review");assert.equal(saved.cursor,2);assert.equal((await AIProject.findById(saved.resultProjectId)).scenes.length,2);assert.match(saved.error,/timeout/);});
-test("safe checkpoint recovery skips completed batches",async()=>{const j=await job();await processScriptJob(j,mock(3));const saved=await ScriptJob.findById(j._id);let calls=0;await processScriptJob(saved,async input=>{calls++;const data=JSON.parse(input.prompt);return JSON.stringify({scenes:data.scenes.map((_,i)=>scene(data.startOrder+i))});});assert.equal(calls,7);assert.equal((await ScriptJob.findById(j._id)).status,"completed");});
+test("safe checkpoint recovery skips completed batches",async()=>{const j=await job();await processScriptJob(j,mock(3));const saved=await ScriptJob.findById(j._id);let calls=0;await processScriptJob(saved,async input=>{calls++;const data=JSON.parse(input.prompt);return JSON.stringify(Object.fromEntries(data.requiredSceneKeys.map((key,i)=>[key,scene(data.startOrder+i)])));});assert.equal(calls,7);assert.equal((await ScriptJob.findById(j._id)).status,"completed");});
 test("targeted agent revision changes the real project and preserves other scenes, IDs and a version",async()=>{
  const original=await AIProject.create({userId:user._id,title:"Original title",summary:"Original summary",scenes:Array.from({length:16},(_,i)=>({...scene(i+1),narration:"Keep original words"}))});
  const beforeIds=original.scenes.map(s=>String(s._id));
@@ -38,4 +39,18 @@ test("truncation preserves saved batches and diagnostics without an unapproved p
  const j=await job();const response=mock();let calls=0;
  await processScriptJob(j,async input=>{calls++;if(calls===3)throw Object.assign(new Error("OpenRouter reached its output token limit"),{code:"INCOMPLETE_PROVIDER_OUTPUT",finishReason:"length",maxOutputTokens:5000,usage:{cost:.001,completion_tokens:5000},requestId:"truncated-fixture"});return response(input);});
  const saved=await ScriptJob.findById(j._id);assert.equal(calls,3);assert.equal(saved.status,"failed");assert.equal(saved.cursor,2);assert.equal(saved.outputFailure.finishReason,"length");assert.equal(saved.outputFailure.requestId,"truncated-fixture");assert.equal((await AIProject.findById(saved.resultProjectId)).scenes.length,2);
+});
+
+test("scene response contract requires each requested scene, accepts complete ordered legacy arrays and rejects missing content",()=>{
+ const schema=scriptBatchSchema(3,2), json=geminiSchema(schema);
+ assert.deepEqual(json.required,["scene_3","scene_4"]);assert.equal(json.properties.scene_3.type,"object");assert.equal(json.additionalProperties,false);
+ assert.equal(schema.parse({scene_3:scene(3),scene_4:scene(4)}).scene_4.order,4);
+ assert.equal(schema.parse({scenes:[scene(4),scene(3)]}).scene_3.order,3);
+ assert.equal(schema.safeParse({scenes:[scene(3)]}).success,false);
+ assert.equal(schema.safeParse({scene_3:scene(3)}).success,false);
+});
+test("an omitted scene never erases saved batches or triggers an additional charged request",async()=>{
+ const j=await job(), response=mock();let calls=0;
+ await processScriptJob(j,async input=>{calls++;if(calls===3)return JSON.stringify({scene_3:scene(3)});return response(input);});
+ const saved=await ScriptJob.findById(j._id);assert.equal(calls,3);assert.equal(saved.status,"failed");assert.equal(saved.cursor,2);assert.match(saved.error,/scene_4/);assert.equal((await AIProject.findById(saved.resultProjectId)).scenes.length,2);
 });

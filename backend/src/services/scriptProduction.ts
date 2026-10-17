@@ -9,6 +9,18 @@ import { settleReservation, releaseReservation } from "./wallet.js";
 export const scriptSettings = z.object({ storyTopic: z.string().trim().min(2).max(6000), nicheId: z.preprocess(v => v === "" ? undefined : v, z.string().regex(/^[a-f0-9]{24}$/i).optional()), type: z.string().max(100).default("Animated story"), genre: z.string().max(100).default("Adventure"), language: z.string().max(100).default("English"), targetDuration: z.string().max(50).default("8 minutes"), visualStyle: z.string().max(200).default("Cinematic"), audience: z.string().max(200).default("General audience"), tone: z.string().max(200).default("Engaging"), dialoguePreference: z.string().max(100).optional(), sceneCount: z.number().int().min(3).max(40).optional(), numberOfCharacters: z.number().int().min(1).max(10).optional() });
 export function scriptShape(settings: any) { const raw = Number(String(settings.targetDuration).match(/[\d.]+/)?.[0] || 8); const seconds = Math.round(Math.min(1800, Math.max(30, /second/i.test(settings.targetDuration) ? raw : raw * 60))); const scenes = Math.min(40, Math.max(3, settings.sceneCount || Math.ceil(seconds / 30))); return { seconds, scenes, calls: 1 + Math.ceil(scenes / 2) }; }
 const planSchema = z.object({ title: z.string(), storyConcept: z.string(), summary: z.string(), characters: scriptProjectSchema.shape.characters, scenes: z.array(z.object({ title: z.string(), purpose: z.string(), duration: z.number().positive() })).min(1).max(40) });
+export function scriptBatchSchema(start: number, count: number) {
+ const keys = Array.from({ length: count }, (_, i) => `scene_${start + i}`);
+ const object = z.object(Object.fromEntries(keys.map(key => [key, scriptProjectSchema.shape.scenes.element])));
+ return z.preprocess((value: any) => {
+  // Accept a complete legacy array, but never discard or invent missing scenes.
+  if (value && Array.isArray(value.scenes) && value.scenes.length === count) {
+   const ordered = keys.map((_, i) => value.scenes.find((s: any) => s.order === start + i));
+   if (ordered.every(Boolean)) return Object.fromEntries(keys.map((key, i) => [key, ordered[i]]));
+  }
+  return value;
+ }, object);
+}
 async function log(job: any, stage: string, message: string) { await ScriptJob.updateOne({ _id: job._id }, { $push: { logs: { stage, message, at: new Date() } }, leaseUntil: new Date(Date.now() + 240000) }); }
 export async function processScriptJob(job: any, request = routerText) {
  const input = job.input, shape = scriptShape(input.settings), quote = job.quote;
@@ -22,14 +34,19 @@ export async function processScriptJob(job: any, request = routerText) {
    await log(job, "retrying", "Provider explicitly rejected this request before generation. Retrying once; ambiguous timeouts are never retried.");
    raw = await request(options);
   }
-  const parsed = schema.parse(JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")));
-  return parsed;
+  const decoded = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+  const validated = schema.safeParse(decoded);
+  if (!validated.success) {
+   const first = validated.error.issues[0];
+   throw new Error(`The script response has a missing or invalid field: ${first.path.join(".") || "response"} (${first.message}). Completed scenes are preserved; no extra generation was submitted.`);
+  }
+  return validated.data;
  };
  try {
   let plan = job.plan, project: any = job.resultProjectId ? await AIProject.findById(job.resultProjectId) : null;
   if (!plan) {
    await log(job, "planning", "Planning the story arc, characters, hook and ending");
-   plan = await invoke(planSchema, "Plan an original complete video narrative. Return structured JSON only. Include a hook, developed middle, character motivations and satisfying ending. Do not generate images or call media services.", JSON.stringify({ settings: input.settings, sceneCount: shape.scenes, targetSeconds: shape.seconds, editInstruction: input.message, existing: input.snapshot ? { title: input.snapshot.title, summary: input.snapshot.summary, scenes: input.snapshot.scenes.map((s: any) => ({ title: s.title, narration: s.narration, dialogue: s.dialogue })) } : undefined }));
+   plan = await invoke(planSchema.extend({ scenes: planSchema.shape.scenes.min(shape.scenes).max(shape.scenes) }), "Plan an original complete video narrative. Return structured JSON only. Include a hook, developed middle, character motivations and satisfying ending. Return exactly the requested sceneCount; do not combine scenes. Do not generate images or call media services.", JSON.stringify({ settings: input.settings, sceneCount: shape.scenes, targetSeconds: shape.seconds, editInstruction: input.message, existing: input.snapshot ? { title: input.snapshot.title, summary: input.snapshot.summary, scenes: input.snapshot.scenes.map((s: any) => ({ title: s.title, narration: s.narration, dialogue: s.dialogue })) } : undefined }));
    if (plan.scenes.length !== shape.scenes) throw new Error("The planning response did not contain the required scene count");
    project = await AIProject.create({ userId: job.userId, title: plan.title, storyConcept: plan.storyConcept, summary: plan.summary, type: input.settings.type, language: input.settings.language, targetDuration: input.settings.targetDuration, visualStyle: input.settings.visualStyle, nicheId: input.settings.nicheId, prompts: { sourceSettings: input.settings, scriptJobId: String(job._id), partial: true }, scenes: [] });
    await ScriptJob.updateOne({ _id: job._id }, { plan, resultProjectId: project._id, inFlight: false });
@@ -39,11 +56,11 @@ export async function processScriptJob(job: any, request = routerText) {
   for (let index = job.cursor || 0; index < plan.scenes.length; index += 2) {
    const count = Math.min(2, plan.scenes.length - index), duration = shape.seconds / shape.scenes;
    await log(job, "writing", `Writing scenes ${index + 1} to ${index + count} of ${plan.scenes.length}`);
-   const schema = z.object({ scenes: scriptProjectSchema.shape.scenes });
-   const result = await invoke(schema, "Write fully developed original screenplay scenes as JSON. Include narration, attributed dialogue, scene descriptions, camera directions, image prompts, video motion prompts, sound descriptions and transition suggestions. Match language and tone. Narration plus dialogue should contain approximately 120-150 spoken words per minute of scene duration. Do not shorten to a synopsis. Scene lengths describe the edited story, NOT a single provider video clip. Audio and shot prompts are descriptive, not model-specific. Include the hook in the first scene and a complete ending in the last. Do not repeat prior scenes. Keep non-spoken technical directions concise: each image/video prompt under 100 words, other direction fields under 40 words. Supply only the required JSON, without explanations.", JSON.stringify({ settings: input.settings, characters: plan.characters, story: plan.summary, scenes: plan.scenes.slice(index, index + count), startOrder: index + 1, secondsPerScene: duration, precedingScene: project.scenes.at(-1)?.narration || "", instruction: input.message }));
-   if (result.scenes.length !== count) throw new Error("The provider returned an incomplete scene batch; completed scenes were preserved");
-   const scenes = result.scenes.map((scene: any, i: number) => ({ ...scene, order: index + i + 1, estimatedDurationSeconds: duration }));
-   const words = scenes.reduce((n: number, s: any) => n + (s.narration + " " + s.dialogue).split(/\s+/).filter(Boolean).length, 0);
+   const keys = Array.from({ length: count }, (_, i) => `scene_${index + i + 1}`);
+   const schema = scriptBatchSchema(index + 1, count);
+   const result = await invoke(schema, "Return one JSON object with exactly these REQUIRED keys: " + keys.join(", ") + ". Each key contains one complete scene object. Do not return a scenes array, a single combined scene, or scenes outside this batch. Write fully developed original screenplay scenes. Include narration, attributed dialogue, scene descriptions, camera directions, image prompts, video motion prompts, sound descriptions and transition suggestions. Match language and tone. Narration plus dialogue should contain approximately 120-150 spoken words per minute of scene duration. Do not shorten to a synopsis. Scene lengths describe the edited story, NOT a single provider video clip. Audio and shot prompts are descriptive, not model-specific. Include the hook in the first scene and a complete ending in the last. Do not repeat prior scenes. Keep non-spoken technical directions concise: each image/video prompt under 100 words, other direction fields under 40 words. Supply only the required JSON, without explanations.", JSON.stringify({ settings: input.settings, characters: plan.characters, story: plan.summary, requiredSceneKeys: keys, requiredSceneCount: count, scenes: plan.scenes.slice(index, index + count), startOrder: index + 1, secondsPerScene: duration, precedingScene: project.scenes.at(-1)?.narration || "", instruction: input.message }));
+   const scenes = keys.map((key, i) => ({ ...result[key], order: index + i + 1, estimatedDurationSeconds: duration }));
+   const words = scenes.reduce((n: number, s: any) => n + (s.narration + " " + (s.dialogueLines?.length ? s.dialogueLines.map((line: any) => line.text).join(" ") : s.dialogue)).split(/\s+/).filter(Boolean).length, 0);
    if (words < duration * count * 1.8) throw new Error("The scene batch is too short for the requested duration; partial work was preserved");
    project.scenes.push(...scenes); await project.save();
    await ScriptJob.updateOne({ _id: job._id }, { cursor: index + count, inFlight: false });
