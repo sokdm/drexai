@@ -3,7 +3,10 @@ import { timelineSchema, timelineDuration, type EditorTimeline } from "@drex/sha
 export function editingCommand(input: EditorTimeline, message: string, captions: any[] = []) {
  const timeline = timelineSchema.parse(structuredClone(input)), text = message.trim().toLowerCase(); let result: EditorTimeline = timeline, explanation = "";
  if (/silent|silence|speed/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made.");
- if (/professional/.test(text)) {
+ if (/zoom in|slow zoom|pan left|pan right/.test(text)) {
+  result.clips = result.clips.map(c => ({ ...c, keyframes: [{ time: 0, zoom: /pan/.test(text) ? 1.3 : 1, x: /pan left/.test(text) ? 1 : /pan right/.test(text) ? 0 : .5, y: .5 }, { time: c.duration, zoom: /pan/.test(text) ? 1.3 : 1.2, x: /pan left/.test(text) ? 0 : /pan right/.test(text) ? 1 : .5, y: .5 }] }));
+  explanation = "Saved interpolated pan/zoom keyframes on each clip. Preview or undo the motion before exporting. This motion does not detect or track speakers.";
+ } else if (/professional/.test(text)) {
   result.clips = result.clips.map((c, i) => ({ ...c, look: "cinematic", brightness: undefined, contrast: undefined, saturation: undefined, transition: i < result.clips.length - 1 ? "fade" : "cut" }));
   result.audio = result.audio.map(a => a.role === "music" ? { ...a, volume: Math.min(a.volume, .15) } : a);
   result.captions = result.captions.map(c => ({ ...c, style: { ...c.style, preset: "bold", animation: "pop" } }));

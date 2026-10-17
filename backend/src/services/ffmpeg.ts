@@ -4,7 +4,7 @@ import { writeFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { EditorTimeline, ExportSettings, outputDimensions, timelineDuration, trackStart } from "@drex/shared";
 import { env } from "../config/env.js";
-import { effectValues } from "@drex/shared";
+import { effectValues, keyframeExpression } from "@drex/shared";
 
 const require = createRequire(import.meta.url);
 export function mediaBinary(tool: "ffmpeg" | "ffprobe"): string {
@@ -43,7 +43,10 @@ export function subtitleDocument(timeline: EditorTimeline, width: number, height
   doc = doc.replace("\n\n[Events]", "\nStyle: Boxed,Arial,36,&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,0,0,0,0,100,100,0,0,3,8,0,2,24,24,28,1\n\n[Events]");
   function event(text: string, start: number, end: number, style: any) {
     const alignment = { top: 8, center: 5, bottom: 2 }[style.position as "top"];
-    const animation = style.animation === "pop" ? "\\fscx85\\fscy85\\t(0,150,\\fscx100\\fscy100)" : style.animation === "fade" ? "\\fad(120,120)" : "";
+    const color = (style.color || "#ffffff").slice(1);
+    const position = style.x !== undefined || style.y !== undefined ? `\\pos(${Math.round((style.x ?? .5) * width)},${Math.round((style.y ?? ({ top: .08, center: .5, bottom: .92 }[style.position as "top"] ?? .92)) * height)})` : "";
+    const overlay = `\\1c&H${color.slice(4, 6)}${color.slice(2, 4)}${color.slice(0, 2)}&\\alpha&H${Math.round((1 - (style.opacity ?? 1)) * 255).toString(16).padStart(2, "0")}&\\frz${-(style.rotation || 0)}${position}`;
+    const animation = overlay + (style.animation === "pop" ? "\\fscx85\\fscy85\\t(0,150,\\fscx100\\fscy100)" : style.animation === "fade" ? "\\fad(120,120)" : "");
     const tags = `${animation}\\fn${style.font}\\fs${Math.round(style.size * height / 720)}\\an${alignment}\\b${style.preset === "bold" ? 1 : 0}\\bord${style.preset === "boxed" ? 8 : 2}\\shad0${style.preset === "boxed" ? "\\3a&H40&" : ""}`;
     doc += `Dialogue: 0,${assTime(start)},${assTime(end)},${style.preset === "boxed" ? "Boxed" : "Default"},,0,0,0,,{${tags}}${assText(text)}\n`;
   }
@@ -69,7 +72,9 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
     const scale = clip.fit === "cover" ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:(iw-ow)*${clip.cropX ?? 0.5}:(ih-oh)/2` : `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     const fade = Math.min(0.3, clip.duration / 3);
     const effects = effectValues(clip);
-    const filters = `${scale},setsar=1,fps=30,format=yuv420p,setpts=(PTS-STARTPTS)/${clip.speed ?? 1},eq=brightness=${effects.brightness}:contrast=${effects.contrast}:saturation=${effects.saturation}${effects.sharpen ? `,unsharp=5:5:${effects.sharpen}` : ""}${effects.vignette ? ",vignette=PI/5" : ""}${clip.transition === "fade" ? `,fade=t=in:st=0:d=${fade},fade=t=out:st=${clip.duration - fade}:d=${fade}` : ""}`;
+    const keys = clip.keyframes || [];
+    const motion = keys.length ? `,scale=w='ceil(${width}*(${keyframeExpression(keys, "zoom")})/2)*2':h='ceil(${height}*(${keyframeExpression(keys, "zoom")})/2)*2':eval=frame,crop=${width}:${height}:x='(iw-ow)*(${keyframeExpression(keys, "x")})':y='(ih-oh)*(${keyframeExpression(keys, "y")})',setsar=1` : "";
+    const filters = `${scale},setsar=1,fps=30,format=yuv420p,setpts=(PTS-STARTPTS)/${clip.speed ?? 1}${motion},eq=brightness=${effects.brightness}:contrast=${effects.contrast}:saturation=${effects.saturation}${effects.sharpen ? `,unsharp=5:5:${effects.sharpen}` : ""}${effects.vignette ? ",vignette=PI/5" : ""}${clip.transition === "fade" ? `,fade=t=in:st=0:d=${fade},fade=t=out:st=${clip.duration - fade}:d=${fade}` : ""}`;
     const segment = `segment-${i}.mp4`; segments.push(segment);
     const frames = Math.max(1, Math.round((elapsed + clip.duration) * 30) - Math.round(elapsed * 30)); elapsed += clip.duration;
     args.push("-frames:v", String(frames), "-vf", filters, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", segment);

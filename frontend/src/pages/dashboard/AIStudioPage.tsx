@@ -1,6 +1,5 @@
 import { AIAssistantPage } from "./AIAssistantPage";
 import { downloadMedia } from "../../lib/downloadMedia";
-import { CreativeTools } from "./CreativeTools";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Clapperboard, Download, Eye, PanelLeftClose, PanelRightClose, Pause, Play, RefreshCw, Square, Terminal } from "lucide-react";
@@ -154,7 +153,7 @@ export function AIStudioPage() {
     anchor.href = url; anchor.download = "drex-production-timeline.json"; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <div className="studio-workspace space-y-4"><nav className="creator-mode-tabs" aria-label="Studio tools"><button aria-pressed={studioMode === "production"} onClick={() => setStudioMode("production")}>Video production</button>{production?.timeline?.length > 0 && <Link to={`/dashboard/video-editor?productionId=${productionId}`}>Timeline and export</Link>}<button aria-pressed={studioMode === "agent"} onClick={() => setStudioMode("agent")}>AI Director chat</button><button aria-pressed={studioMode === "avatar"} onClick={() => setStudioMode("avatar")}>Talking avatar</button><Link to="/dashboard/video-editor?mode=shorts">Long video to short clips</Link></nav>{studioMode === "agent" && <AIAssistantPage productionId={productionId || undefined} />}{studioMode === "avatar" && <CreativeTools kind="avatar" />}<div hidden={studioMode !== "production"}>
+  return <div className="studio-workspace space-y-4"><nav className="creator-mode-tabs" aria-label="Studio tools"><button aria-pressed={studioMode === "production"} onClick={() => setStudioMode("production")}>Video production</button>{production?.timeline?.length > 0 && <Link to={`/dashboard/video-editor?productionId=${productionId}`}>Timeline and export</Link>}<button aria-pressed={studioMode === "agent"} onClick={() => setStudioMode("agent")}>AI Director chat</button><Link to="/dashboard/video-editor?mode=shorts">Long video to short clips</Link></nav>{studioMode === "agent" && <AIAssistantPage productionId={productionId || undefined} />}<div hidden={studioMode !== "production"}>
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4 dark:border-slate-800">
       <div><h1 className="text-2xl font-bold">AI Studio</h1><p className="mt-1 text-sm text-slate-500">{production?.title ?? project?.title ?? "Choose a script project"}</p></div>
       <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{production?.status?.replaceAll("_", " ") ?? "Ready to plan"}</span><button aria-label="Toggle project panel" title="Project panel" className="focus-ring grid h-10 w-10 place-items-center rounded-md border border-line dark:border-slate-700" onClick={() => setLeftOpen(!leftOpen)}><PanelLeftClose size={18} /></button><button aria-label="Toggle activity panel" title="Activity panel" className="focus-ring grid h-10 w-10 place-items-center rounded-md border border-line dark:border-slate-700" onClick={() => setRightOpen(!rightOpen)}><PanelRightClose size={18} /></button></div>

@@ -15,7 +15,7 @@ export async function platformGate(req: any, res: any, next: any) {
     const privileged = await adminIdentity(req); if (privileged) return next();
     if (settings.maintenance) return res.status(503).json({ error: settings.message, maintenance: true });
     const key = req.path.split("/")[1], feature = featurePaths[key];
-    const specific = key === "ai" && /\/(script|projects)/.test(req.path) ? "scripts" : key === "publishing" && /thumbnail/.test(req.path) ? "thumbnails" : key === "creative" && req.body?.kind === "avatar" ? "avatars" : key === "creative" && req.body?.kind === "shorts" ? "shorts" : null;
+    const specific = key === "ai" && /\/(script|projects)/.test(req.path) ? "scripts" : key === "publishing" && /thumbnail/.test(req.path) ? "thumbnails" : key === "creative" && req.body?.kind === "shorts" ? "shorts" : null;
     if (specific && settings.features?.[specific] === false) return res.status(403).json({ error: "This feature is temporarily unavailable." });
     if (req.path === "/auth/register" && settings.features?.registrations === false) return res.status(403).json({ error: "New registrations are temporarily disabled." });
     if (feature && settings.features?.[feature] === false) return res.status(403).json({ error: "This feature is temporarily unavailable." });

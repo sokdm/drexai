@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { timelineSchema, timelineDuration, clipStart, trackStart, type EditorTimeline } from "@drex/shared";
+import { sliceKeyframes, timelineSchema, timelineDuration, clipStart, trackStart, type EditorTimeline } from "@drex/shared";
 export function speechRanges(log: string, duration: number, padding = .12) {
   const silence: [number, number][] = []; let start = 0;
   for (const match of log.matchAll(/silence_(start|end):\s*([\d.]+)/g)) {
@@ -25,7 +25,7 @@ export function retainTimelineRanges(input: EditorTimeline, ranges: [number, num
       const at = clipStart(original, c.id), start = Math.max(from, at), end = Math.min(to, at + c.duration);
       if (end <= start) continue;
       if (end - start < .1) throw new Error("A silence cut leaves a fragment shorter than 0.1 seconds. Adjust clip boundaries and retry.");
-      result.clips.push({ ...c, id: randomUUID(), sourceIn: c.sourceIn + (c.kind === "video" ? (start - at) * (c.speed ?? 1) : 0), duration: end - start, transition: "cut" });
+      result.clips.push({ ...c, keyframes: sliceKeyframes(c, start - at, end - at), id: randomUUID(), sourceIn: c.sourceIn + (c.kind === "video" ? (start - at) * (c.speed ?? 1) : 0), duration: end - start, transition: "cut" });
     }
     for (const a of original.audio) {
       const at = trackStart(original, a), start = Math.max(from, at), end = Math.min(to, at + a.duration);

@@ -13,8 +13,6 @@ const envSchema = z.object({
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(14).max(200).optional(),
   ADMIN_BOOTSTRAP_PASSWORD_HASH: z.string().optional(),
   ADMIN_BOOTSTRAP_ENABLED: z.preprocess(v => v === true || v === "true", z.boolean()).default(false),
-  HEYGEN_API_KEY: z.string().optional(),
-  AVATAR_PRESENTERS_JSON: z.string().optional(),
   ADMIN_LOGIN_METHOD: z.enum(["email", "totp"]).default("email"),
   ADMIN_TOTP_SECRET: z.string().regex(/^[A-Z2-7]{16,128}$/).optional(),
   MONGODB_URI: z.string().min(1).optional(),

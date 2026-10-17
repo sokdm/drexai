@@ -22,7 +22,6 @@ import { hashSecret } from "../dist/utils/crypto.js";
 import { errorHandler } from "../dist/middleware/errorHandler.js";
 import { prepareShortClips, validateMoments } from "../dist/services/shortClips.js";
 import { runMedia, probeMedia, subtitleDocument } from "../dist/services/ffmpeg.js";
-import { availablePresenters } from "../dist/services/avatar.js";
 let database, server, base, admin, user, directory, captured, headers;
 const originalFetch = globalThis.fetch;
 before(async () => {
@@ -62,9 +61,12 @@ test("creative jobs are private and require CSRF; unconfigured pricing cannot ch
   assert.equal((await request("/api/creative/quote", { kind: "shorts", name: "Source", count: 5, sizeBytes: 1000 }, { Cookie: headers.Cookie })).status, 403);
   const quote = await request("/api/creative/quote", { kind: "shorts", name: "Source", count: 5, sizeBytes: 1000 }, headers); assert.equal(quote.status, 200); assert.equal(quote.data.quote.allowed, false);
 });
-test("personal avatars are only offered to their owner after an authorization reference", () => {
-  env.AVATAR_PRESENTERS_JSON = JSON.stringify([{ id: "stock", name: "Stock", voiceId: "voice" }, { id: "personal", name: "Me", voiceId: "voice", ownerEmail: user.email, authorizationReference: "verified-provider-consent" }, { id: "unverified", name: "Pending", voiceId: "voice", ownerEmail: user.email }]);
-  assert.deepEqual(availablePresenters(user.email).map(p => p.id), ["stock", "personal"]); assert.deepEqual(availablePresenters(admin.email).map(p => p.id), ["stock"]);
+test("removed presenter generation is rejected before quoting or charging", async () => {
+ const result = await request("/api/creative/quote", { kind: "avatar", name: "Removed", presenterId: "test", script: "Hello there", ratio: "16:9", consent: true }, headers);
+ assert.equal(result.status, 400);
+ const config = await request("/api/creative/config", null, headers);
+ assert.equal(config.data.presenters, undefined);
+ assert.equal(config.data.avatarConfigured, undefined);
 });
 const moments = { moments: Array.from({ length: 5 }, (_, i) => ({ start: i * 5, end: i * 5 + 5, title: `Moment ${i}`, hook: "A useful idea", score: 65, reason: "A clear self-contained idea", speakerX: .7, captions: [{ start: 0, end: 3, text: "Example speech" }] })) };
 test("clip timing rejects overlapping selections, invalid captions and invented out-of-source times", () => {

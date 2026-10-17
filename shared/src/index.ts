@@ -1,6 +1,7 @@
 import { z } from "zod";
 export * from "./editor.js";
 export * from "./visualEffects.js";
+export * from "./keyframes.js";
 
 export const brand = {
   name: "Drex",
