@@ -114,7 +114,7 @@ export async function quoteAutomaticCredits(input: any) {
     return { allowed: true, credits: 0, feature: input.feature, provider: "openrouter", model: input.model, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: 0, pricingVersion: policy.revision, pricingSource: estimate.source, requestLimits: { ...estimate.limits, fallbacks: freeFallbacks, approvedCostUsd: 0 }, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
   }
   const requestLimits: any = { ...estimate.limits }, candidates: any[] = [];
-  if (!["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt", "full_video_transcription"].includes(input.feature)) {
+  if (!input.settings?.singleModel && !["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt", "full_video_transcription"].includes(input.feature)) {
     const model = "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
     if (model !== input.model) try {
       const record = await verifiedRouterModel(model, "text");

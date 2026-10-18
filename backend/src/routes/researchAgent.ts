@@ -27,13 +27,23 @@ researchAgentRouter.get("/agent/conversations", wrap(async (req: any, res: any) 
 researchAgentRouter.get("/agent/conversations/:id", wrap(async (req: any, res: any) => { const conversation = await AIConversation.findOne({ _id: id.parse(req.params.id), userId: req.user._id }); if (!conversation) return res.status(404).json({ error: "Conversation not found" }); res.json({ conversation }); }));
 async function price(input: any, userId?: string) {
  if(input.fastChat && !input.draftProject) {
-  const {env}=await import("../config/env.js");const paidModel="openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL;
-  const paid:any=await createQuote({feature:"ai_research_chat",model:paidModel,provider:"openrouter",quantity:2,settings:{fastChat:true}});
-  if(!paid.allowed)throw new Error(paid.reason);
-  if(!(Number(paid.protectedCostUsd)<=Number(paid.netCreditUsd)))throw new Error("The configured fallback model exceeds the one-credit cost ceiling. Admin must select an affordable text fallback.");
+  const { routerCatalog } = await import("../services/openrouter.js");
+  const configured="openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL;
+  const catalog=await routerCatalog("text");
+  const compatible=catalog.filter((m:any)=>!m.id.endsWith(":free") && m.architecture?.output_modalities?.includes("text") && m.supported_parameters?.includes("max_tokens") && m.supported_parameters?.includes("response_format"));
+  compatible.sort((a:any,b:any)=>(Number(a.pricing?.prompt)*6000+Number(a.pricing?.completion)*1200)-(Number(b.pricing?.prompt)*6000+Number(b.pricing?.completion)*1200));
+  const candidates=[configured,...compatible.map((m:any)=>"openrouter/"+m.id)];
+  let paid:any,paidModel:string|undefined;
+  for(const model of [...new Set(candidates)]) {
+   try {
+    const quote:any=await createQuote({feature:"ai_research_chat",model,provider:"openrouter",quantity:2,settings:{fastChat:true,singleModel:true}});
+    if(quote.allowed && Number(quote.protectedCostUsd)<=Number(quote.netCreditUsd)){paid=quote;paidModel=model;break;}
+   }catch{/* Never send an unverified or unaffordable model. */}
+  }
   const wallet=await Wallet.findOne({userId});
   let freeModel:string|undefined;
   try{const {freeAiAvailable}=await import("../services/freeAiLimits.js");if(userId&&await freeAiAvailable(userId,2))freeModel=await (await import("../services/assistantRouting.js")).assistantModel("ai_research_chat","free");}catch{}
+  if(!paid) {if(freeModel)return createQuote({feature:"ai_research_chat",model:freeModel,provider:"openrouter",quantity:2,settings:{fastChat:true}});throw new Error("No verified text model currently fits the one-credit budget. Review chat operating costs in Admin pricing.");}
   if(!wallet||wallet.availableCredits<1) {if(freeModel)return createQuote({feature:"ai_research_chat",model:freeModel,provider:"openrouter",quantity:2});throw new Error("Add one credit to continue with the fast assistant.");}
   return {...paid,credits:1,model:freeModel||paidModel,pricingSource:"bounded-one-credit-chat",requestLimits:{...paid.requestLimits,fallbacks:freeModel?[{model:paidModel,maxPrice:paid.requestLimits.maxPrice}]:[],freeDeadlineMs:8000,approvedCostUsd:paid.estimatedCostUsd},fastChat:true};
  }

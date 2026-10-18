@@ -31,7 +31,7 @@ before(async () => {
  await PricingOverride.create({ feature: "ai_research_chat", model: "openrouter/google/gemini-3.8-flash", unit: "request", costUsd: ".001", expiresAt: new Date(Date.now() + 3600000) });
  globalThis.fetch = async (url, options) => {
   if (!String(url).startsWith("https://openrouter.ai")) return original(url, options);
-  if (String(url).endsWith("/models")) return Response.json({ data: [{id:"openai/gpt-4.1-mini",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.0000001",completion:"0.0000004"}}, { id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }, { id: "fixture/research:free", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], context_length: 64000, pricing: { prompt: "0", completion: "0" } }] });
+  if (String(url).endsWith("/models")) return Response.json({ data: [{id:"fixture/affordable",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.00000001",completion:"0.00000004"}}, {id:"openai/gpt-4.1-mini",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.0000001",completion:"0.0000004"}}, { id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }, { id: "fixture/research:free", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], context_length: 64000, pricing: { prompt: "0", completion: "0" } }] });
   if (String(url).endsWith("/key")) return Response.json({ data: { limit_remaining: 100 } });
   assert.ok(String(url).endsWith("chat/completions")); providerCalls++; const body = JSON.parse(options.body);
   if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: body.model.endsWith(":free") ? 0 : .001 } });
@@ -112,3 +112,13 @@ test("fast plain chat skips planning and paid continuation settles at one credit
  assert.equal(providerCalls-calls,1);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits-1);
  await PricingPolicy.deleteOne({_id:"global"});
 });
+
+ test("fast chat selects a verified affordable alternative when configured fallback is too costly",async()=>{
+ const override=await PricingOverride.create({feature:"ai_research_chat",model:"openrouter/openai/gpt-4.1-mini",unit:"request",costUsd:1,verifiedAt:new Date(),verificationUrl:"https://example.test/pricing",expiresAt:new Date(Date.now()+60000)});
+ try {
+ const payload={message:"Hello there",mode:"auto",fastChat:true};
+ const response=await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)});
+ const {quote}=await response.json();assert.equal(response.status,200);assert.equal(quote.allowed,true);assert.equal(quote.credits,1);
+ assert.equal(quote.requestLimits.fallbacks[0]?.model || quote.model,"openrouter/fixture/affordable");
+ }finally{await PricingOverride.deleteOne({_id:override._id});}
+ });
