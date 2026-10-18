@@ -31,3 +31,5 @@
 @media(min-width:1200px){.studio-agent-focus .studio-columns.studio-with-left.studio-with-right{grid-template-columns:220px minmax(0,1fr) minmax(360px,1fr)}.studio-agent-focus .studio-columns.studio-with-right:not(.studio-with-left){grid-template-columns:minmax(0,1fr) minmax(360px,1fr)}}
 
 .agent-tool-activity pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;font-size:10px}.agent-tool-activity summary{cursor:pointer}
+
+.agent-task-card{padding:12px;border:1px solid #7965d866;border-radius:9px;margin:10px 0;font-size:12px}.agent-task-card button{background:#6545c8;color:white;border-radius:7px;padding:8px 10px}.agent-task-card p{margin:7px 0}.agent-task-card details{max-height:240px;overflow:auto}

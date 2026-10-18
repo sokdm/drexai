@@ -46,6 +46,7 @@ export async function processScriptJob(job: any, request = routerText) {
    await log(job, "retrying", "Provider explicitly rejected this request before generation. Retrying once; ambiguous timeouts are never retried.");
    raw = await request(options);
   }
+  await ScriptJob.updateOne({_id:job._id},{inFlight:false});
   const decoded = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
   const validated = schema.safeParse(decoded);
   if (!validated.success) {
@@ -134,6 +135,8 @@ export async function processScriptJob(job: any, request = routerText) {
   const freeOnly = quote.estimatedCostUsd === 0 && !(quote.requestLimits?.fallbacks || []).some((f:any) => !f.model.endsWith(":free"));
   const timedOut = /abort|timeout|timed out/i.test(error.message);
   const uncertain = !freeOnly && (error.billingUncertain === true || /abort|timeout|network|fetch failed/i.test(error.message));
+  console.warn(JSON.stringify({event:"script_stage_failure",jobId:String(job._id),stage:job.cursor||0,code:error.code,status:error.status,finishReason:error.finishReason,name:error.name,uncertain}));
+  if(!uncertain)await ScriptJob.updateOne({_id:job._id},{inFlight:false});
   const failureMessage = quote.feature === "ai_research_chat" ? publicChatError(error) : timedOut ? (freeOnly ? "Free script provider timeout: no response arrived before the deadline. Saved scenes are preserved and your reserved credits have been released. Try again or select a paid model." : "Script provider timeout: no response arrived before the deadline. Saved scenes are preserved. This request needs billing review before retrying to prevent duplicate charges.") : error.message;
   await log(job, "error", failureMessage);
   if (error.code === "INCOMPLETE_PROVIDER_OUTPUT") await ScriptJob.updateOne({ _id: job._id }, { outputFailure: { finishReason: error.finishReason, maxOutputTokens: error.maxOutputTokens, usage: error.usage, requestId: error.requestId } });

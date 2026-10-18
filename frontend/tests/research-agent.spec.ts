@@ -13,7 +13,7 @@ for (const width of [390, 1440]) test(`research chat quotes, streams, and resume
  await page.goto("/dashboard/ai-assistant"); await page.getByLabel("Message YouTube Chef").fill("Find a content opportunity");
  page.on("dialog",d=>{dialogs++;void d.accept();});
  await page.getByRole("button", { name: "Send", exact: true }).click();
- await expect(page.getByText("Evidence based content idea.", { exact: true })).toBeVisible(); expect(calls).toBe(1);expect(dialogs).toBe(0);await expect(page.locator(".chat-cost-note")).toContainText("2 messages remaining");await expect(page.getByText("search videos",{exact:true})).toBeVisible();
+ await expect(page.getByText("Evidence based content idea.", { exact: true })).toBeVisible(); expect(calls).toBe(1);expect(dialogs).toBe(0);await expect(page.locator(".chat-cost-note")).toContainText("2 messages remaining");await expect(page.locator(".agent-tool-activity summary").filter({hasText:"search videos"})).toBeVisible();
  await expect(page.getByLabel("Message YouTube Chef")).toHaveValue("");
  await expect(page.getByRole("checkbox")).toHaveCount(0);
  const composer = await page.getByLabel("Message YouTube Chef").boundingBox(); expect(composer!.height).toBeLessThanOrEqual(88);

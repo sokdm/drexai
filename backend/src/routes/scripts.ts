@@ -32,24 +32,24 @@ async function normalize(userId: any, input: any) {
  const original = scriptShape(input.settings);
  return { ...input, settings: { ...input.settings, sceneCount: Math.max(1,count), ...(longer ? { targetDuration: Math.min(30, original.seconds / 60 * 1.5) + " minutes" } : {}) } };
 }
-async function terms(input: any, userId?: string) {
- if(input.projectId && input.message)return freeChatTerms(userId!,scriptShape(input.settings).calls,true);
+export async function scriptToolTerms(input: any, userId?: string) {
+
  const model = await (await import("../services/assistantRouting.js")).assistantModel("story_generation", input.settings.modelMode, userId, scriptShape(input.settings).calls);
  if (!model.startsWith("openrouter/")) throw new Error("Select an OpenRouter model for Story generation in Admin / Providers. Script Builder no longer submits direct-provider requests.");
  return createQuote({ feature: "story_generation", provider: "openrouter", model, quantity: scriptShape(input.settings).calls });
 }
-scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); try{res.json({ quote: await rememberQuote(req.user._id, input, await terms(input, String(req.user._id))), stages: scriptShape(input.settings) });}catch(e:any){if(input.projectId&&input.message)return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});throw e;} }));
+scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); try{res.json({ quote: await rememberQuote(req.user._id, input, await scriptToolTerms(input, String(req.user._id))), stages: scriptShape(input.settings) });}catch(e:any){if(input.projectId&&input.message)return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});throw e;} }));
 scriptsRouter.post("/scripts/generate", wrap(async (req: any, res: any) => {
  const requestId = z.string().uuid().parse(req.body.requestId), input = await normalize(req.user._id, inputSchema.parse(req.body));
  const prior = await ScriptJob.findOne({ userId: req.user._id, requestId }); if (prior) return res.status(202).json({ job: prior });
  const snapshot = input.projectId ? await AIProject.findOne({ _id: input.projectId, userId: req.user._id }) : null;
  if (input.projectId && !snapshot) return res.status(404).json({ error: "Project not found" });
- const approvedCredits = z.number().nonnegative().parse(req.body.approvedCredits), quote = input.projectId && input.message ? await terms(input,String(req.user._id)) : await approvedTerms(req.user._id, input, approvedCredits, () => terms(input, String(req.user._id)));
- if (!quote.allowed || quote.credits !== approvedCredits) throw new Error("Review and approve the full current script quote");
- if(input.projectId && input.message)await admitChatMessage(String(req.user._id),"script:"+requestId);
+ const approvedCredits = z.number().nonnegative().parse(req.body.approvedCredits), quote = await approvedTerms(req.user._id, input, approvedCredits, () => scriptToolTerms(input, String(req.user._id)));
+ if (quote.feature !== "story_generation" || !quote.allowed || quote.credits !== approvedCredits) throw new Error("Review and approve the full current script quote");
+
  const reservation = await reserveCredits(String(req.user._id), quote, `script:${req.user._id}:${requestId}`);
  try {
- const job = await ScriptJob.create({ userId: req.user._id, requestId, status: "queued", input: { ...input, snapshot: snapshot?.toObject() }, baseUpdatedAt: snapshot?.updatedAt, quote, reservationId: reservation._id, logs: [{ stage: "waiting", message: input.projectId && input.message ? "Free assistant revision queued." : "Credit approval recorded. Waiting for the script worker.", at: new Date() }] });
+ const job = await ScriptJob.create({ userId: req.user._id, requestId, status: "queued", input: { ...input, snapshot: snapshot?.toObject() }, baseUpdatedAt: snapshot?.updatedAt, quote, reservationId: reservation._id, logs: [{ stage: "waiting", message: "Creation tool approved. Waiting for the script worker.", at: new Date() }] });
  res.status(202).json({ job });
  } catch (e: any) { if (e.code === 11000) return res.status(202).json({ job: await ScriptJob.findOne({ userId: req.user._id, requestId }) }); await releaseReservation(String(reservation._id), "script_setup_failed"); throw e; }
 }));

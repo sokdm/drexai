@@ -43,6 +43,7 @@ export async function routerResponse(endpoint: string, body?: any, timeout = 180
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     if (body && mongoose.connection.readyState === 1) await GatewayUsage.create({ model: "openrouter/" + body.model, kind: endpoint === "chat/completions" ? "text" : endpoint === "images" ? "image" : endpoint === "audio/speech" ? "voice" : endpoint === "audio/transcriptions" ? "transcription" : "video", status: "failed", usage: { httpStatus: response.status, costUnknown: true } });
+    console.warn(JSON.stringify({event:"openrouter_rejected",endpoint,model:body?.model,status:response.status,requestId:response.headers.get("x-request-id"),parameters:body?Object.keys(body):[]}));
     const detail = String(data.error?.message || "Review provider access, balance and model availability");
     const privacy = /training violation|guardrail restrictions|data policy/i.test(detail);
     const definiteTextFailure = endpoint === "chat/completions" && response.status === 503 && !!data.error && !data.id && !data.generation_id;
@@ -68,6 +69,7 @@ export async function routerText(input: TextInput) {
    if (index) await assertProviderBudget(candidate.model, (input.requestLimits as any)?.approvedCostUsd);
    return await withProvider(candidate.model, () => routerTextAttempt({ ...input, timeoutMs: free ? input.requestLimits!.freeDeadlineMs : input.timeoutMs, ...(input.onDelta ? {onDelta:(text:string)=>{if(text)emitted=true;input.onDelta!(text);}} : {}), model: candidate.model, requestLimits: input.requestLimits ? { ...input.requestLimits, maxPrice: candidate.maxPrice } : undefined }));
   } catch (error: any) {
+   console.warn(JSON.stringify({event:"text_route_failure",model:candidate.model,status:error.status,code:error.code,name:error.name,emitted,nextApproved:index<candidates.length-1}));
    const freeTimeout=free && !emitted && /abort|timeout|timed out/i.test(error.message);
    const freeQuota=free && (error.code === "FREE_AI_LIMIT" || error.code === "INCOMPLETE_PROVIDER_OUTPUT");
    if (index === candidates.length - 1 || emitted || !(freeTimeout || freeQuota || error.providerRejected && [404,429,503].includes(error.status))) throw error;

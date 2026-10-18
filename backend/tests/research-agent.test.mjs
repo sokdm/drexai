@@ -24,7 +24,7 @@ import { withProvider } from "../dist/services/platformControl.js";
 import { hashSecret } from "../dist/utils/crypto.js";
 import { env } from "../dist/config/env.js";
 import { errorHandler } from "../dist/middleware/errorHandler.js";
-let db, server, base, user; const original = fetch; let providerCalls = 0, plannedTools = [],rejectConfigured=false;
+let db, server, base, user; const original = fetch; let providerCalls = 0, plannedTools = [],rejectConfigured=false,rejectSummary=false;
 before(async () => {
  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }] }); await mongoose.connect(db.getUri("research_agent"));
  env.OPENROUTER_API_KEY = "test"; env.OPENROUTER_MANAGEMENT_KEY = undefined;
@@ -39,12 +39,13 @@ before(async () => {
   assert.ok(String(url).endsWith("chat/completions")); providerCalls++; const body = JSON.parse(options.body);
   if(rejectConfigured && body.model==="openai/gpt-4.1-mini")return Response.json({error:{message:"No endpoints found that can handle the requested parameters"}},{status:404});
   if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: body.model.endsWith(":free") ? 0 : .001 } });
+  if(rejectSummary)throw Object.assign(new Error("Fixture summary timeout"),{name:"TimeoutError"});
   return new Response('data: {"id":"answer-1","choices":[{"delta":{"content":"Original idea. "}}]}\n\ndata: {"choices":[{"delta":{"content":"Review your draft."},"finish_reason":"stop"}],"usage":{"cost":0.001}}\n\ndata: [DONE]\n\n');
  };
  const app = express(); app.use(express.json(), cookieParser()); app.use("/api/ai", aiRouter);app.use("/api/videos",videosRouter); app.use(errorHandler); server = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); }); base = `http://127.0.0.1:${server.address().port}/api/ai`;
 });
 after(async () => { globalThis.fetch = original; server?.closeAllConnections(); if (server) await new Promise(r => server.close(r)); await mongoose.disconnect(); await db?.stop(); });
-beforeEach(async()=>{const {ChatUsage}=await import("../dist/services/chatAccess.js");const {FreeAiUsage}=await import("../dist/services/freeAiLimits.js");await ChatUsage.deleteMany({});await FreeAiUsage.deleteMany({});});
+beforeEach(async()=>{const {ChatUsage}=await import("../dist/services/chatAccess.js");const {FreeAiUsage}=await import("../dist/services/freeAiLimits.js");await ChatUsage.deleteMany({});await FreeAiUsage.deleteMany({});await Wallet.updateOne({userId:user._id},{$set:{availableCredits:500}});});
 const headers = { "Content-Type": "application/json", Cookie: "drex_session=agent", "x-csrf-token": "csrf" };
 test("stream parsing emits real chunks and rejects truncated responses", async () => {
  const chunks = []; const result = await readProviderStream(new Response('data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'), s => chunks.push(s)); assert.equal(result.text, "Hello"); assert.deepEqual(chunks, ["Hello"]);
@@ -129,14 +130,14 @@ test("legacy chat ignores old paid approvals and never deducts wallet credits",a
  const response=await original(base+"/chat",{method:"POST",headers,body:JSON.stringify({message:"Hello legacy assistant",approvedCredits:1})});
  assert.equal(response.status,200,await response.clone().text());assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
 });
-test("saved-script assistant revisions are zero-credit and share the message allowance",async()=>{
+test("saved-script assistant revisions require creation credits while messages remain free",async()=>{
  const project=await AIProject.create({userId:user._id,title:"Owned script",scenes:[{order:1,title:"Opening",narration:"Keep original speech",imagePrompt:"A city",videoMotionPrompt:"Slow camera"}]});
  const input={projectId:String(project._id),message:"Rewrite Scene 1",settings:{storyTopic:"An original story",targetDuration:"10 seconds",modelMode:"paid"}};
- const response=await original(base+"/scripts/quote",{method:"POST",headers,body:JSON.stringify(input)});const {quote}=await response.json();assert.equal(response.status,200);assert.equal(quote.credits,0);
- const before=await Wallet.findOne({userId:user._id});const payload={...input,approvedCredits:0,requestId:"a716a1f4-1681-4bcb-9372-e9303560fe45"};
+ const response=await original(base+"/scripts/quote",{method:"POST",headers,body:JSON.stringify(input)});const {quote}=await response.json();assert.equal(response.status,200);assert.ok(quote.credits>=1);
+ const before=await Wallet.findOne({userId:user._id});const payload={...input,approvedCredits:quote.credits,requestId:"a716a1f4-1681-4bcb-9372-e9303560fe45"};
  const generated=await original(base+"/scripts/generate",{method:"POST",headers,body:JSON.stringify(payload)});assert.equal(generated.status,202,await generated.clone().text());
  const again=await original(base+"/scripts/generate",{method:"POST",headers,body:JSON.stringify(payload)});assert.equal(again.status,202);
- const status=await (await original(base+"/agent/limits",{headers})).json();assert.equal(status.used,1);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
+ const status=await (await original(base+"/agent/limits",{headers})).json();assert.equal(status.used,0);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits-quote.credits);
 });
 
 test("chat quota cannot be bypassed by a new conversation or paid mode",async()=>{
@@ -154,4 +155,12 @@ test("image motion suggestion costs zero and shares the four-hour allowance",asy
  const before=await Wallet.findOne({userId:user._id});const reply=await original(url,{method:"POST",headers,body:JSON.stringify({...body,approvedCredits:0})});assert.equal(reply.status,200,await reply.clone().text());assert.ok((await reply.json()).prompt);
  assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
  const status=await (await original(base+"/agent/limits",{headers})).json();assert.equal(status.used,1);
+});
+
+test("a failed final summary preserves completed tool evidence and does not charge chat",async()=>{
+ const production=await StudioProduction.create({userId:user._id,projectId:new mongoose.Types.ObjectId(),title:"Saved production",status:"draft",snapshot:{},settings:{},estimate:{},timeline:[]});
+ plannedTools=[{name:"inspect_production",query:"status"}];rejectSummary=true;const before=await Wallet.findOne({userId:user._id});
+ try{const response=await original(base+'/agent/chat',{method:'POST',headers,body:JSON.stringify({message:'Inspect production status',productionId:String(production._id),approvedCredits:0})});const wire=await response.text();assert.match(wire,/event: done/);assert.doesNotMatch(wire,/event: error/);assert.match(wire,/tool activity above is saved/);
+ const conversation=await AIConversation.findOne({userId:user._id}).sort({createdAt:-1});assert.ok(conversation.messages.some(m=>m.metadata?.toolResult?.tool.name==='inspect_production'));assert.equal(conversation.messages.at(-1).metadata.incomplete,true);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
+ }finally{plannedTools=[];rejectSummary=false;}
 });

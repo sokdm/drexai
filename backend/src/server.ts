@@ -1,3 +1,4 @@
+import {startAgentTaskWorker} from "./services/agentStory.js";
 import { startRenderFallback } from "./services/renderFallback.js";
 import { startScriptWorker } from "./services/scriptProduction.js";
 import { startMongoGenerationFallback } from "./services/generationDispatch.js";
@@ -86,5 +87,6 @@ startNotificationWorker();
 startProviderMonitor();
 startMongoGenerationFallback();
 startScriptWorker();
+startAgentTaskWorker();
 startRenderFallback();
 httpServer.listen(env.PORT, () => console.log(`Drex API listening on ${env.PORT}`));

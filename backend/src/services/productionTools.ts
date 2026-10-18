@@ -14,10 +14,10 @@ import { studioLog } from "./studioExecution.js";
 
 function fail(message:string,statusCode=400):never{throw Object.assign(new Error(message),{statusCode});}
 const idSchema=z.string().regex(/^[a-f\d]{24}$/i,"Invalid ID");
-export async function prepareProduction(userId:string,body:unknown){
+export async function prepareProduction(userId:string,body:unknown,allowDraftPlanning=false,agentTaskId?:string){
   const input = z.object({ projectId: idSchema, settings: studioSettingsSchema, sourceProductionId: idSchema.optional(), regenerateStepKey: z.string().max(150).optional() }).parse(body);
   const project = await AIProject.findOne({ _id: input.projectId, userId: userId }).lean();
-  if (!project || !project.approvedAt) fail("Approve the script before creating a production plan");
+  if (!project || !project.approvedAt && !allowDraftPlanning) fail("Approve the script before creating a production plan");
   const characters = await CharacterProfile.find({ projectId: project!._id, userId: userId }).lean();
   const refs = [];
   for (const character of characters) {
@@ -26,6 +26,8 @@ export async function prepareProduction(userId:string,body:unknown){
   }
   const niche = project!.nicheId ? await Niche.findOne({ _id: project!.nicheId, userId: userId }).lean() : null;
   let snapshot: any = JSON.parse(JSON.stringify({ title: project!.title, summary: project!.summary, scenes: project!.scenes, characters: refs, niche, product: (project!.prompts as any)?.sourceSettings?.product }));
+  if(!project!.approvedAt && allowDraftPlanning){snapshot.scenes=snapshot.scenes.map((scene:any)=>({...scene,approved:true}));snapshot.requiresScriptReview=true;}
+  if(agentTaskId)snapshot.agentTaskId=agentTaskId;
   let settings = input.settings;
   let source: any;
   if (input.sourceProductionId) {
@@ -58,7 +60,8 @@ export async function prepareProduction(userId:string,body:unknown){
     else{estimate.renderCredits=quote.credits;estimate.renderQuote=quote;estimate.renderMaxSeconds=seconds;if(estimate.credits!==null)estimate.credits+=quote.credits;}
     estimate.renderMode="ffmpeg-mp4";
   }
-  const production = await StudioProduction.create({ userId: userId, projectId: input.projectId, sourceProductionId: source ? String(source._id) : undefined, title: project!.title, snapshot, settings, steps, estimate, expiresAt: new Date(Date.now() + 10 * 60000) });
+  const values={ userId: userId, projectId: input.projectId, sourceProductionId: source ? String(source._id) : undefined, title: project!.title, snapshot, settings, steps, estimate, expiresAt: new Date(Date.now() + 10 * 60000) };
+  const production=agentTaskId?await StudioProduction.findOneAndUpdate({userId,"snapshot.agentTaskId":agentTaskId},{$setOnInsert:values},{upsert:true,new:true}):await StudioProduction.create(values);
   await studioLog(production, "waiting", "Production plan prepared. Awaiting credit approval.");
   return production;
 }

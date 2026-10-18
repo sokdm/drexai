@@ -24,6 +24,7 @@ const productionSchema = new Schema({
   completedAt: Date
 }, { timestamps: true });
 
+productionSchema.index({userId:1,"snapshot.agentTaskId":1},{unique:true,partialFilterExpression:{"snapshot.agentTaskId":{$type:"string"}}});
 export const StudioProduction = model("StudioProduction", productionSchema);
 
 const eventSchema = new Schema({

@@ -84,6 +84,7 @@ studioRouter.post("/productions/:id/edit-command", wrap(async (req, res) => {
 studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {
   const production = await own(req);
   if ((production.snapshot as any)?.product && !(await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled) fail("Product commercials are disabled by the administrator");
+  if((production.snapshot as any)?.requiresScriptReview){const project=await AIProject.findOne({_id:production.projectId,userId:req.user._id});if(!project?.approvedAt)fail("Review and approve the saved script before starting media generation");}
   const { maxCredits } = z.object({ maxCredits: z.number().int().nonnegative().max(1000000) }).parse(req.body);
   if (production.status !== "draft") {
     if (production.approvedAt) return res.json({ production });
