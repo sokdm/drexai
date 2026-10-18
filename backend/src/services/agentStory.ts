@@ -36,7 +36,7 @@ export async function approveStoryTask(userId:string,taskId:string,approvedCredi
  let job:any;
  if(task.scriptJobId){job=await ScriptJob.findOneAndUpdate({_id:task.scriptJobId,userId,status:"failed",inFlight:{$ne:true}},{$set:{quote:task.quote,reservationId:reserve._id,status:"queued",error:"",inFlight:false},$unset:{leaseUntil:1}},{new:true,session});if(!job)throw new Error("This request cannot be safely replayed. Saved progress is available for review.");}
  else{[job]=await ScriptJob.create([{userId,requestId:randomUUID(),status:"queued",input:{settings:task.input.settings},quote:task.quote,reservationId:reserve._id,logs:[{stage:"waiting",message:"Agent creation tool approved; script worker queued.",at:new Date()}]}],{session});}
- task.scriptJobId=job._id;task.status="running";task.error=undefined;task.events.push({tool:"script_builder",status:"queued",message:"Approved script generation queued. Progress is saved after every stage.",at:new Date()});await task.save({session});
+ task.scriptJobId=job._id;task.approvedAt=new Date();task.status="running";task.error=undefined;task.events.push({tool:"script_builder",status:"queued",message:"Approved script generation queued. Progress is saved after every stage.",at:new Date()});await task.save({session});
  });}finally{await session.endSession();}return AgentTask.findOne({_id:taskId,userId});
 }
 export async function advanceStoryTask(taskId:string){
@@ -63,9 +63,17 @@ export async function continueStoryTask(userId:string,taskId:string,usePaid=fals
  const task=await AgentTask.findOne({_id:taskId,userId});if(!task)throw new Error("Task not found");
  if(task.status==="completed"||task.status==="running")return task;
  if(task.stage==="production_plan"){await AgentTask.updateOne({_id:taskId,userId},{$set:{status:"running",error:""}});await advanceStoryTask(taskId);return AgentTask.findOne({_id:taskId,userId});}
+ if(task.status==="rejected")throw new Error("This operation was rejected. Send a new request to change the plan.");
  if(task.status==="needs_review")throw new Error("The last provider request has an uncertain outcome. Review saved scenes before starting another paid request.");
  let calls=scriptShape(task.input.settings).calls;
  if(task.scriptJobId){const job=await ScriptJob.findOne({_id:task.scriptJobId,userId});if(job?.inFlight)throw new Error("Wait for the provider request to finish");calls=Math.max(1,Math.ceil((scriptShape(task.input.settings).scenes-(job?.cursor||0))/2)+(job?.plan?0:1));}
  const quote=await storyQuote(userId,task.input.settings,calls,usePaid);task.quote=quote;task.status="awaiting_approval";task.error=undefined;await task.save();return task;
 }
 export function startAgentTaskWorker(){let busy=false;const tick=async()=>{if(busy)return;busy=true;try{const tasks=await AgentTask.find({status:"running",$or:[{leaseUntil:{$exists:false}},{leaseUntil:{$lt:new Date()}}]}).select("_id").limit(10);for(const task of tasks)await advanceStoryTask(String(task._id));}catch(e:any){diagnoseAgent("worker",e);}finally{busy=false;}};const timer=setInterval(()=>void tick(),3000);timer.unref();return()=>clearInterval(timer);}
+
+export function publicStoryTask(task:any){const value=task.toObject?task.toObject():task;return {...value,quote:{credits:value.quote.credits,model:value.quote.model,fallbackModels:(value.quote.requestLimits?.fallbacks||[]).map((f:any)=>f.model),quantity:value.input.settings.sceneCount,expiresAt:value.quote.expiresAt,allowed:value.quote.allowed}};}
+export async function rejectStoryTask(userId:string,taskId:string){
+ const task=await AgentTask.findOneAndUpdate({_id:taskId,userId,status:"awaiting_approval"},{$set:{status:"rejected",rejectedAt:new Date()},$push:{events:{tool:"script_builder",status:"rejected",message:"Script creation rejected. No credits were reserved; ask the agent to revise the plan.",at:new Date()}}},{new:true});
+ if(!task){const previous=await AgentTask.findOne({_id:taskId,userId});if(previous?.status==="rejected")return previous;throw new Error("This operation is no longer awaiting approval");}
+ await AIConversation.updateOne({_id:task.conversationId,userId},{$push:{messages:{role:"assistant",content:"Script creation was rejected. No credits were reserved. Tell me how to adjust the plan.",metadata:{taskId:String(task._id),rejected:true}}}});return task;
+}

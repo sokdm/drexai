@@ -31,7 +31,7 @@ export async function studioWorkerOnline() {
 // MongoDB is the outbox: work survives a crash between saving approval and enqueueing.
 export async function reconcileStudioQueue() {
   const queue = getStudioQueue();
-  const productions = await StudioProduction.find({ status: { $in: ["queued", "running"] }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }).limit(100);
+  const productions = await StudioProduction.find({ status: { $in: ["queued", "running", "awaiting_credit_execution", "executing_approval"] }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }).limit(100);
   for (const production of productions) {
     const jobId = `${production._id}-r${production.queueRevision}`;
     const old = await queue.getJob(jobId);

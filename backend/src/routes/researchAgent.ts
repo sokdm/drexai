@@ -1,7 +1,9 @@
+import {CreditReservation} from "../models/CreditReservation.js";
+import {ensureProductionApprovals,approveCreditCard,rejectCreditCard} from "../services/agentApprovals.js";
 import {AgentTask} from "../models/AgentTask.js";
 import {ScriptJob} from "../models/ScriptJob.js";
 import {randomUUID} from "node:crypto";
-import {isStoryIntent,createStoryTask,approveStoryTask,advanceStoryTask,continueStoryTask,diagnoseAgent} from "../services/agentStory.js";
+import {isStoryIntent,createStoryTask,approveStoryTask,advanceStoryTask,continueStoryTask,diagnoseAgent,rejectStoryTask,publicStoryTask} from "../services/agentStory.js";
 import {freeChatTerms,admitChatMessage,chatStatus,publicChatError} from "../services/chatAccess.js";
 import {executeProductionTool,productionToolNames} from "../services/agentTools.js";
 import {studioSettingsSchema} from "../services/studioPlan.js";
@@ -35,10 +37,14 @@ researchAgentRouter.get("/agent/conversations/:id", wrap(async (req: any, res: a
 async function price(input:any,userId?:string):Promise<any>{if((isStoryIntent(input.message)||input.draftProject)&&input.workspace!=="image")return {allowed:true,credits:0,feature:"ai_research_chat",toolRequest:true};return freeChatTerms(userId!,input.draftProject?3:2,input.draftProject);}
 researchAgentRouter.get("/agent/limits",wrap(async(req:any,res:any)=>res.json(await chatStatus(String(req.user._id)))));
 researchAgentRouter.post("/agent/quote", wrap(async (req: any, res: any) => { const input = inputSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, input, await price(input, String(req.user._id))) }); }));
-researchAgentRouter.get("/agent/tasks",wrap(async(req:any,res:any)=>{const query:any={userId:req.user._id};if(req.query.conversationId)query.conversationId=id.parse(req.query.conversationId);res.json({tasks:await AgentTask.find(query).sort({createdAt:-1}).limit(20)});}));
-researchAgentRouter.get("/agent/tasks/:id",wrap(async(req:any,res:any)=>{const task=await AgentTask.findOne({_id:id.parse(req.params.id),userId:req.user._id});if(!task)return res.status(404).json({error:"Task not found"});if(task.status==="running")await advanceStoryTask(String(task._id));const fresh=await AgentTask.findById(task._id);const job=task.scriptJobId?await ScriptJob.findOne({_id:task.scriptJobId,userId:req.user._id}).select("status logs cursor resultProjectId projectId"):null;const projectId=fresh?.projectId||job?.projectId||job?.resultProjectId;res.json({task:fresh,job,project:projectId?await AIProject.findOne({_id:projectId,userId:req.user._id}):null,production:fresh?.productionId?await StudioProduction.findOne({_id:fresh.productionId,userId:req.user._id}):null});}));
-researchAgentRouter.post("/agent/tasks/:id/approve",wrap(async(req:any,res:any)=>res.json({task:await approveStoryTask(String(req.user._id),id.parse(req.params.id),z.number().int().nonnegative().parse(req.body.approvedCredits))})));
-researchAgentRouter.post("/agent/tasks/:id/continue",wrap(async(req:any,res:any)=>res.json({task:await continueStoryTask(String(req.user._id),id.parse(req.params.id),z.boolean().default(false).parse(req.body.usePaid))})));
+researchAgentRouter.get("/agent/tasks",wrap(async(req:any,res:any)=>{const query:any={userId:req.user._id};if(req.query.conversationId)query.conversationId=id.parse(req.query.conversationId);res.json({tasks:(await AgentTask.find(query).sort({createdAt:-1}).limit(20)).map(publicStoryTask)});}));
+researchAgentRouter.get("/agent/tasks/:id",wrap(async(req:any,res:any)=>{const task=await AgentTask.findOne({_id:id.parse(req.params.id),userId:req.user._id});if(!task)return res.status(404).json({error:"Task not found"});if(task.status==="running")await advanceStoryTask(String(task._id));const fresh=await AgentTask.findById(task._id);const job=task.scriptJobId?await ScriptJob.findOne({_id:task.scriptJobId,userId:req.user._id}).select("status logs cursor resultProjectId projectId"):null;const projectId=fresh?.projectId||job?.projectId||job?.resultProjectId;const wallet=await Wallet.findOne({userId:req.user._id}).select("availableCredits reservedCredits spentCredits").lean();const savedJob=await ScriptJob.findOne({_id:task.scriptJobId,userId:req.user._id}).select("reservationId");const transaction=savedJob?.reservationId?await CreditReservation.findOne({_id:savedJob.reservationId,userId:req.user._id}).select("status credits remainingCredits").lean():null;res.json({task:fresh?publicStoryTask(fresh):null,wallet,transaction,job,project:projectId?await AIProject.findOne({_id:projectId,userId:req.user._id}):null,production:fresh?.productionId?await StudioProduction.findOne({_id:fresh.productionId,userId:req.user._id}):null});}));
+researchAgentRouter.post("/agent/tasks/:id/approve",wrap(async(req:any,res:any)=>res.json({task:publicStoryTask(await approveStoryTask(String(req.user._id),id.parse(req.params.id),z.number().int().nonnegative().parse(req.body.approvedCredits)))})));
+researchAgentRouter.post("/agent/tasks/:id/continue",wrap(async(req:any,res:any)=>res.json({task:publicStoryTask(await continueStoryTask(String(req.user._id),id.parse(req.params.id),z.boolean().default(false).parse(req.body.usePaid)))})));
+researchAgentRouter.post("/agent/tasks/:id/reject",wrap(async(req:any,res:any)=>res.json({task:publicStoryTask(await rejectStoryTask(String(req.user._id),id.parse(req.params.id)))})));
+researchAgentRouter.get("/agent/approvals",wrap(async(req:any,res:any)=>res.json(await ensureProductionApprovals(String(req.user._id),id.parse(req.query.productionId),req.query.conversationId?id.parse(req.query.conversationId):undefined))));
+researchAgentRouter.post("/agent/approvals/:id/approve",wrap(async(req:any,res:any)=>res.json({approval:await approveCreditCard(String(req.user._id),id.parse(req.params.id),z.number().int().nonnegative().parse(req.body.approvedCredits))})));
+researchAgentRouter.post("/agent/approvals/:id/reject",wrap(async(req:any,res:any)=>res.json({approval:await rejectCreditCard(String(req.user._id),id.parse(req.params.id))})));
 researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
  const input = inputSchema.parse(req.body), approvedCredits = z.number().int().nonnegative().parse(req.body.approvedCredits);
  let conversation: any, reservation: any, heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -57,7 +63,7 @@ researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
   send("conversation", { id: conversation._id }); send("progress", { text: input.workspace==="production"?"Preparing requested production task":"Planning research" });
   if((isStoryIntent(input.message)||input.draftProject)&&input.workspace!=="image"){
    const task=await createStoryTask(String(req.user._id),String(conversation._id),input.message,input.requestId||randomUUID(),input.productionSettings);
-   send("conversation",{id:task.conversationId});send("task",{task});
+   send("conversation",{id:task.conversationId});send("task",{task:publicStoryTask(task)});
    send("delta",{text:"I will use Script Builder to create the requested story and save its scenes. Please approve the creation cost below; no images or videos will be generated without further approval."});send("done",{conversationId:conversation._id});return;
   }
   const production = input.productionId ? await StudioProduction.findOne({ _id: input.productionId, userId: req.user._id }) : null;

@@ -1,3 +1,4 @@
+import {CreditApproval} from "../models/CreditApproval.js";
 import {CreditReservation} from "../models/CreditReservation.js";
 import { providerFor } from "./openrouter.js";
 import { ensureProductionEdit } from "./sharedEditing.js";
@@ -40,7 +41,7 @@ async function bytesFor(asset: any, providers: StudioProviders) {
 
 export async function runStudioProduction(id: string, providers: StudioProviders = studioProviders) {
   const leaseToken = randomUUID();
-  const production: any = await StudioProduction.findOneAndUpdate({ _id: id, status: { $in: ["queued", "running"] }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }, { $set: { status: "running", leaseToken, leaseUntil: new Date(Date.now() + 45000) }, $inc: { attempts: 1 } }, { new: true });
+  const production: any = await StudioProduction.findOneAndUpdate({ _id: id, status: { $in: ["queued", "running", "awaiting_credit_execution", "executing_approval"] }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }, { $set: { leaseToken, leaseUntil: new Date(Date.now() + 45000) }, $inc: { attempts: 1 } }, { new: true });
   if (!production) return;
   let lostLease = false;
   const heartbeat = setInterval(() => {
@@ -69,10 +70,22 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     return false;
   }
   try {
+    await checkpoint({status:production.approvalMode==="cards"?"executing_approval":"running"});
     if (!production.reservationId) throw new Error("Production needs an approved credit reserve");
+    const card=production.approvalMode==="cards"?await CreditApproval.findOne({_id:production.activeApprovalId,userId:production.userId,productionId:production._id,status:"approved",reservationId:production.reservationId}):null;
+    if(production.approvalMode==="cards"){
+      const {approvalSignature}=await import("./agentApprovals.js");
+      if(!card||approvalSignature(production,card.scope!,steps.filter(s=>card.stepKeys.includes(s.key)),card.credits)!==card.signature)throw new Error("This operation has no valid scoped credit approval. No provider request was submitted.");
+    }
+    async function awaitNextApproval(){
+      await (await import("./agentApprovals.js")).finishCreditCard(production,"completed");
+      await checkpoint({status:"paused",control:"pause"});
+      await studioLog(production,"waiting","Approved operation complete. Waiting for the next credit approval inside chat.");
+    }
     for (const step of steps) {
       current = step;
       if (step.status === "completed" || step.status === "skipped") continue;
+      if(card&&!card.stepKeys.includes(step.key)){await awaitNextApproval();return;}
       if (step.kind === "audio" && step.input.track === "dialogue") {
         step.status = "skipped"; await checkpoint();
         await studioLog(production, "waiting", step.label + ": legacy separate dialogue skipped; prepare a new native-audio plan.", step.key); continue;
@@ -177,6 +190,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     await studioLog(production, "processing", "Free editing: saving the shared editor timeline, synchronized audio and available transcript captions.");
     const edit = await ensureProductionEdit({ ...production.toObject(), timeline });
     await studioLog(production, "success", `Shared editor ready at revision ${edit.revision}. Manual and Studio edits use this same saved timeline.`);
+    if(card?.scope==="operation"&&production.settings.autoExport){await awaitNextApproval();return;}
     if(production.settings.autoExport){
       const {VideoExport}=await import("../models/VideoEdit.js");
       const {timelineSchema,exportSettingsSchema}=await import("@drex/shared");
@@ -190,6 +204,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
       await studioLog(production,exportJob?.status==="failed"?"failure":exportJob?.status==="completed"?"success":"waiting",`FFmpeg MP4 export ${exportJob?.status || "queued"}; uses the original approved budget and saved editor revision.`,"final-render");
     }else await closeStudioReserve(String(production.reservationId), "production_complete");
     await checkpoint({ status: "completed", completedAt: new Date(), error: "" });
+    if(!production.settings.autoExport)await (await import("./agentApprovals.js")).finishCreditCard(production,"completed");
     await studioLog(production, "success", "Your video production is ready for review.");
   } catch (error: any) {
     if (lostLease) return;
@@ -201,7 +216,8 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     const uncertain = current?.status === "needs_review" || (current?.status === "requesting" && !current.providerJobId && !current.stored && !error.providerRejected);
     if (current && current.status !== "completed") { current.status = uncertain ? "needs_review" : "failed"; current.error = error.message; }
     await checkpoint({ status: uncertain ? "needs_review" : "failed", error: error.message });
-    // Unspent funds remain reserved while recoverable work is paused; cancellation releases them.
+    if(production.approvalMode==="cards")await (await import("./agentApprovals.js")).finishCreditCard(production,"failed");
+    // Legacy production budgets remain reserved for recovery; scoped cards release unused funds.
     await studioLog(production, "failure", error.message, current?.key);
   } finally {
     clearInterval(heartbeat);

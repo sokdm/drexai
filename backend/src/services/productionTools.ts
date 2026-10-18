@@ -66,13 +66,13 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
   return production;
 }
 
-export async function controlProduction(userId:string,productionId:string,body:unknown){
+export async function controlProduction(userId:string,productionId:string,body:unknown,workerReady=studioWorkerOnline){
   const production=await StudioProduction.findOne({_id:idSchema.parse(productionId),userId});
   if(!production)fail("Production not found",404);
   const { action } = z.object({ action: z.enum(["pause", "resume", "cancel", "retry"]) }).parse(body);
   if (["completed", "cancelled"].includes(production.status)) return production;
   if (action === "pause") {
-    await StudioProduction.updateOne({ _id: production._id, status: { $in: ["queued", "running"] } }, { $set: { control: "pause" } });
+    await StudioProduction.updateOne({ _id: production._id, status: { $in: ["queued", "running", "awaiting_credit_execution", "executing_approval"] } }, { $set: { control: "pause" } });
   } else if (action === "cancel") {
     await StudioProduction.updateOne({ _id: production._id }, { $set: { control: "cancel" } });
     const session = await mongoose.startSession();
@@ -84,9 +84,13 @@ export async function controlProduction(userId:string,productionId:string,body:u
     } finally { await session.endSession(); }
   } else {
     if (!["paused", "failed"].includes(production.status)) fail("Only paused or failed work can resume. Uncertain provider requests require a new regeneration quote.");
-    if (!await studioWorkerOnline()) fail("Studio worker is offline", 503);
+    if(production.approvalMode==="cards"){
+      const {CreditApproval}=await import("../models/CreditApproval.js");const {CreditReservation}=await import("../models/CreditReservation.js");
+      if(!await CreditApproval.exists({_id:production.activeApprovalId,userId,status:"approved"})||!await CreditReservation.exists({_id:production.reservationId,userId,status:"reserved"}))fail("Approve the next operation inside chat before continuing");
+    }
+    if (!await workerReady()) fail("Studio worker is offline", 503);
     const steps = production.steps.map((s: StudioStep) => s.status === "failed" ? { ...s, status: "pending", error: undefined } : s);
-    const updated = await StudioProduction.findOneAndUpdate({ _id: production._id, status: production.status, control: { $ne: "cancel" }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }, { $set: { status: "queued", control: "run", steps, error: "" }, $inc: { queueRevision: 1 } }, { new: true });
+    const updated = await StudioProduction.findOneAndUpdate({ _id: production._id, status: production.status, control: { $ne: "cancel" }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }, { $set: { status: production.approvalMode==="cards"?"awaiting_credit_execution":"queued", control: "run", steps, error: "" }, $inc: { queueRevision: 1 } }, { new: true });
     if (!updated) fail("Wait for the current operation to finish");
     await enqueueStudio(updated).catch(() => null);
   }
