@@ -130,10 +130,13 @@ export async function processScriptJob(job: any, request = routerText) {
   await settleReservation(String(job.reservationId));
   await ScriptJob.updateOne({ _id: job._id }, { status: "completed", inFlight: false });
  } catch (error: any) {
-  const uncertain = error.billingUncertain === true || /abort|timeout|network|fetch failed/i.test(error.message);
-  await log(job, "error", error.message);
+  const freeOnly = quote.estimatedCostUsd === 0 && !(quote.requestLimits?.fallbacks || []).some((f:any) => !f.model.endsWith(":free"));
+  const timedOut = /abort|timeout|timed out/i.test(error.message);
+  const uncertain = !freeOnly && (error.billingUncertain === true || /abort|timeout|network|fetch failed/i.test(error.message));
+  const failureMessage = timedOut ? (freeOnly ? "Free script provider timeout: no response arrived before the deadline. Saved scenes are preserved and your reserved credits have been released. Try again or select a paid model." : "Script provider timeout: no response arrived before the deadline. Saved scenes are preserved. This request needs billing review before retrying to prevent duplicate charges.") : error.message;
+  await log(job, "error", failureMessage);
   if (error.code === "INCOMPLETE_PROVIDER_OUTPUT") await ScriptJob.updateOne({ _id: job._id }, { outputFailure: { finishReason: error.finishReason, maxOutputTokens: error.maxOutputTokens, usage: error.usage, requestId: error.requestId } });
-  await ScriptJob.updateOne({ _id: job._id }, { status: uncertain ? "needs_review" : "failed", error: error.message });
+  await ScriptJob.updateOne({ _id: job._id }, { status: uncertain ? "needs_review" : "failed", error: failureMessage });
   // Ambiguous provider submissions must not be retried or declared free automatically.
   if (!uncertain) await releaseReservation(String(job.reservationId), "script_stage_failed");
  }

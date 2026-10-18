@@ -45,6 +45,8 @@ test("verified free quotes stay zero and execute without a paid fallback",async(
   assert.equal(quote.credits,0);assert.equal(quote.estimatedCostUsd,0);assert.deepEqual(quote.requestLimits.fallbacks,[]);
   assert.equal(await routerText({model:quote.model,userId:user,system:"Help",prompt:"Research",requestLimits:quote.requestLimits}),"A real fixture reply");
   assert.equal(calls,1);
+  const scriptQuote=await quoteAutomaticCredits({feature:"story_generation",model:"openrouter/"+record.id,quantity:3});
+  assert.equal(scriptQuote.credits,1);assert.equal(scriptQuote.serviceMinimumCredits,1);assert.equal(scriptQuote.estimatedCostUsd,0);assert.equal(scriptQuote.requestLimits.freeDeadlineMs,60000);
  } finally {globalThis.fetch=original;env.OPENROUTER_API_KEY=key;}
 });
 

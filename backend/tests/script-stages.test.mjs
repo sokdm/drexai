@@ -11,7 +11,7 @@ import { AIProject } from "../dist/models/AIProject.js";
 import { MediaAsset } from "../dist/models/MediaAsset.js";
 import { Wallet } from "../dist/models/Wallet.js";
 import { User } from "../dist/models/User.js";
-import { reserveCredits } from "../dist/services/wallet.js";
+import { reserveCredits, settleReservation } from "../dist/services/wallet.js";
 let db,user;
 before(async()=>{ db=await MongoMemoryReplSet.create({replSet:{count:1},binary:{downloadDir:fileURLToPath(new URL("../../node_modules/.cache/mongodb-memory-server",import.meta.url))}});await mongoose.connect(db.getUri("script_stages"));user=await User.create({email:"script-stages@example.test",displayName:"Test",passwordHash:"fixture",status:"active"});await Wallet.create({userId:user._id,availableCredits:1000});});
 after(async()=>{await mongoose.disconnect();await db.stop();});
@@ -90,4 +90,17 @@ test("one-second scripts retain one scene and complete through the durable worke
  return JSON.stringify({scene_1:{...scene(1),narration:"Light awakens."}});});
  const saved=await ScriptJob.findById(j._id),project=await AIProject.findById(saved.projectId);
  assert.equal(saved.status,"completed");assert.equal(calls,2);assert.equal(project.scenes.length,1);assert.equal(project.targetDuration,"1 second");assert.equal(project.scenes[0].estimatedDurationSeconds,1);assert.equal(project.prompts.durationEstimate.needsReview,false);
+});
+
+test("completed free scripts retain the approved service minimum and settle once",async()=>{
+ const before=await Wallet.findOne({userId:user._id});
+ const r=await reserveCredits(String(user._id),{credits:1,serviceMinimumCredits:1,feature:"story_generation",provider:"openrouter",model:"openrouter/fixture:free",creditUsd:"0.018",assumptions:{}},"free-script-service");
+ await settleReservation(String(r._id),0);await settleReservation(String(r._id),0);
+ const after=await Wallet.findOne({userId:user._id});assert.equal(after.availableCredits,before.availableCredits-1);assert.equal(after.spentCredits,before.spentCredits+1);
+});
+test("free script timeouts release the reservation while preserving saved scenes",async()=>{
+ const j=await job();j.quote={...j.quote,estimatedCostUsd:0,model:"openrouter/fixture/script:free"};await j.save();
+ await processScriptJob(j,async()=>{throw new DOMException("aborted due to timeout","TimeoutError");});
+ const saved=await ScriptJob.findById(j._id);assert.equal(saved.status,"failed");assert.match(saved.error,/released/);
+ const {CreditReservation}=await import("../dist/models/CreditReservation.js");assert.equal((await CreditReservation.findById(j.reservationId)).status,"released");
 });

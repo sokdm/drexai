@@ -127,6 +127,7 @@ export async function settleReservation(reservationId: string, providerCostUsd?:
     const { calculateCreditPrice } = await import("./creditPricingEngine.js");
     credits = providerCostUsd === 0 ? 0 : Math.min(credits, calculateCreditPrice(providerCostUsd, [{ amount: Number(prior.quote.creditUsd), credits: 1 }], prior.quote.assumptions, prior.quote.quantity || 1, prior.quote.feature === "text_to_image").credits);
   }
+  credits = Math.min(prior.credits, Math.max(credits, Number(prior.quote?.serviceMinimumCredits || 0)));
   const session = await mongoose.startSession();
   await session.withTransaction(async () => {
     const reservation = await CreditReservation.findById(reservationId).session(session);
