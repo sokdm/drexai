@@ -23,7 +23,7 @@ const original = globalThis.fetch, originalKey = env.OPENROUTER_API_KEY;
 let db, dir, mp3, video, png, fail = false, requests = [], pricingAvailable = false, blockGoogle = false, textFinish = "stop";
 const models = [
  { id: "openai/gpt-4.1-mini", top_provider: { max_completion_tokens: 16000 }, architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format", "reasoning"], pricing: { prompt: "0.0000004", completion: "0.0000016" } },
- { id: "google/gemini-3.8-flash", architecture: { input_modalities: ["text", "image", "video"], output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], pricing: { prompt: "0.000001", completion: "0.000002" } },
+ { id: "google/gemini-3.8-flash", architecture: { input_modalities: ["text", "image", "video"], output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format", "structured_outputs"], pricing: { prompt: "0.000001", completion: "0.000002" } },
  { id: "google/gemini-3.8-flash-tts", architecture: { output_modalities: ["speech"] }, pricing: { prompt: "0.00001" } }
 ];
 const image = { id: "google/gemini-nano-banana-2.1", architecture: { output_modalities: ["image"] }, supported_parameters: { resolution: { type: "enum", values: ["1K", "2K"] }, aspect_ratio: { type: "enum", values: ["16:9", "1:1"] }, input_references: { type: "range", min: 0, max: 14 } } };
@@ -162,4 +162,10 @@ test("truncated output records its actual finish reason and reported reasoning u
  try { await assert.rejects(routerText({model:"openrouter/openai/gpt-4.1-mini",system:"Script",prompt:"Write",maxOutputTokens:5000}), error => { assert.equal(error.code,"INCOMPLETE_PROVIDER_OUTPUT"); assert.equal(error.finishReason,"length"); assert.equal(error.usage.completion_tokens_details.reasoning_tokens,4990); assert.match(error.message,/output limit: 5000/); return true; });
  const usage=await GatewayUsage.findOne({requestId:"text-truncated"}); assert.equal(usage.usage.finish_reason,"length"); assert.equal(usage.costUsd,.001);
  } finally { textFinish="stop"; }
+});
+
+test("JSON-mode-only models do not receive unsupported schema formatting and still validate results",async()=>{
+ const value=await geminiJson({model:"openrouter/openai/gpt-4.1-mini",system:"Help",prompt:"Write a title",schema:z.object({title:z.string()})});
+ assert.equal(value.title,"Valid script");const body=requests.at(-1).body;assert.equal(body.response_format.type,"json_object");assert.equal(body.response_format.json_schema,undefined);assert.match(body.messages[0].content,/matching this schema/);
+ await assert.rejects(()=>geminiJson({model:"openrouter/openai/gpt-4.1-mini",system:"Help",prompt:"Write",schema:z.object({requiredField:z.string()})}));
 });

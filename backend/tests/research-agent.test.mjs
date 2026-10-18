@@ -21,7 +21,7 @@ import { withProvider } from "../dist/services/platformControl.js";
 import { hashSecret } from "../dist/utils/crypto.js";
 import { env } from "../dist/config/env.js";
 import { errorHandler } from "../dist/middleware/errorHandler.js";
-let db, server, base, user; const original = fetch; let providerCalls = 0, plannedTools = [];
+let db, server, base, user; const original = fetch; let providerCalls = 0, plannedTools = [],rejectConfigured=false;
 before(async () => {
  db = await MongoMemoryReplSet.create({ replSet: { count: 1 }, instanceOpts: [{ launchTimeout: 60000 }] }); await mongoose.connect(db.getUri("research_agent"));
  env.OPENROUTER_API_KEY = "test"; env.OPENROUTER_MANAGEMENT_KEY = undefined;
@@ -34,6 +34,7 @@ before(async () => {
   if (String(url).endsWith("/models")) return Response.json({ data: [{id:"fixture/affordable",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.00000001",completion:"0.00000004"}}, {id:"openai/gpt-4.1-mini",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.0000001",completion:"0.0000004"}}, { id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }, { id: "fixture/research:free", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], context_length: 64000, pricing: { prompt: "0", completion: "0" } }] });
   if (String(url).endsWith("/key")) return Response.json({ data: { limit_remaining: 100 } });
   assert.ok(String(url).endsWith("chat/completions")); providerCalls++; const body = JSON.parse(options.body);
+  if(rejectConfigured && body.model==="openai/gpt-4.1-mini")return Response.json({error:{message:"No endpoints found that can handle the requested parameters"}},{status:404});
   if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: body.model.endsWith(":free") ? 0 : .001 } });
   return new Response('data: {"id":"answer-1","choices":[{"delta":{"content":"Original idea. "}}]}\n\ndata: {"choices":[{"delta":{"content":"Review your draft."},"finish_reason":"stop"}],"usage":{"cost":0.001}}\n\ndata: [DONE]\n\n');
  };
@@ -122,3 +123,14 @@ test("fast plain chat skips planning and paid continuation settles at one credit
  assert.equal(quote.requestLimits.fallbacks[0]?.model || quote.model,"openrouter/fixture/affordable");
  }finally{await PricingOverride.deleteOne({_id:override._id});}
  });
+
+test("parameter routing rejection switches to a prequoted affordable model within one credit",async()=>{
+ const {PricingPolicy}=await import("../dist/models/Finance.js");await PricingPolicy.updateOne({_id:"global"},{values:{freeUserDailyRequests:1,freeSharedDailyRequests:1,freeSharedMinuteRequests:1}},{upsert:true});
+ rejectConfigured=true;
+ try{
+ const payload={message:"Hello again",mode:"auto",fastChat:true};const {quote}=await (await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)})).json();
+ assert.equal(quote.credits,1);assert.ok(quote.requestLimits.fallbacks.some(f=>f.model==="openrouter/fixture/affordable"));
+ const before=await Wallet.findOne({userId:user._id});const response=await original(base+"/agent/chat",{method:"POST",headers,body:JSON.stringify({...payload,approvedCredits:1})});const stream=await response.text();assert.match(stream,/event: done/);assert.doesNotMatch(stream,/event: error/);
+ assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits-1);
+ }finally{rejectConfigured=false;await PricingPolicy.deleteOne({_id:"global"});}
+});

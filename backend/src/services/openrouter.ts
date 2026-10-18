@@ -81,20 +81,23 @@ async function routerTextAttempt(input: TextInput) {
   if (input.schema && !supported.includes("response_format")) throw new Error("Choose an OpenRouter text model with structured output support");
   const body: any = { model: routerId(input.model), messages: [{ role: "system", content: input.system }, { role: "user", content: input.media?.length ? [{ type: "text", text: input.prompt }, ...input.media] : input.prompt }], provider: { require_parameters: true, allow_fallbacks: !!input.requestLimits?.maxPrice, ...(input.requestLimits?.maxPrice ? { max_price: input.requestLimits.maxPrice } : {}) } };
   const limits = input.requestLimits || { maxInputTokens: 20000, maxOutputTokens: 12000 };
-  const inputBytes = Buffer.byteLength(input.system + input.prompt, "utf8");
+  const jsonSchema=input.schema?geminiSchema(input.schema):undefined;
+  const nativeSchema=Boolean(input.schema && supported.includes("structured_outputs"));
+  if(input.schema && !nativeSchema)body.messages[0].content += "\nReturn one JSON object matching this schema exactly (no markdown): "+JSON.stringify(jsonSchema);
+  const inputBytes = Buffer.byteLength(body.messages[0].content + input.prompt, "utf8");
   if (inputBytes > limits.maxInputTokens) throw new Error("Input exceeds this quote's conservative text token limit. Shorten the context or obtain a new verified quote.");
   if (supported.includes("max_tokens")) body.max_tokens = Math.min(input.maxOutputTokens ?? 5000, limits.maxOutputTokens);
   const modelOutputLimit = Number(record.top_provider?.max_completion_tokens ?? record.max_completion_tokens);
   if (Number.isFinite(modelOutputLimit) && modelOutputLimit > 0) body.max_tokens = Math.min(body.max_tokens, Math.floor(modelOutputLimit));
   if (input.reasoningEffort && supported.includes("reasoning")) body.reasoning = { effort: input.reasoningEffort };
-  if (input.schema) body.response_format = { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: geminiSchema(input.schema) } };
+  if (input.schema) body.response_format = nativeSchema ? { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: jsonSchema } } : {type:"json_object"};
   const { verifiedFreeText, admitFreeAi } = await import("./freeAiLimits.js");
   if (verifiedFreeText(record)) {
     // Exact free model, no paid route substitutions; every retry consumes shared quota.
     body.provider.allow_fallbacks = false;
     await admitFreeAi(input.userId);
   }
-  if (input.onDelta) { body.stream = true; body.stream_options = { include_usage: true }; const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId, input.reservationId); return result.text; }
+  if (input.onDelta) { body.stream = true; const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000); const result = await readProviderStream(response, input.onDelta); await recordRouterUsage(input.model, "text", result, input.userId, input.reservationId); return result.text; }
   const response = await routerResponse("chat/completions", body, input.timeoutMs ?? 90000), data = await response.json();
   await recordRouterUsage(input.model, "text", data, input.userId, input.reservationId);
   const result = data.choices?.[0]?.message?.content;
