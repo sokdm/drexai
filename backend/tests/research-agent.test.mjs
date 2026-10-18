@@ -1,10 +1,13 @@
-import { before, after, test } from "node:test";
+import { before, after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import express from "express";
 import cookieParser from "cookie-parser";
-import { researchAgentRouter } from "../dist/routes/researchAgent.js";
+import sharp from "sharp";
+import {videosRouter} from "../dist/routes/videos.js";
+import {MediaAsset} from "../dist/models/MediaAsset.js";
+import { aiRouter } from "../dist/routes/ai.js";
 import { readProviderStream } from "../dist/services/providerStream.js";
 import { User } from "../dist/models/User.js";
 import { Session } from "../dist/models/Session.js";
@@ -31,16 +34,17 @@ before(async () => {
  await PricingOverride.create({ feature: "ai_research_chat", model: "openrouter/google/gemini-3.8-flash", unit: "request", costUsd: ".001", expiresAt: new Date(Date.now() + 3600000) });
  globalThis.fetch = async (url, options) => {
   if (!String(url).startsWith("https://openrouter.ai")) return original(url, options);
-  if (String(url).endsWith("/models")) return Response.json({ data: [{id:"fixture/affordable",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.00000001",completion:"0.00000004"}}, {id:"openai/gpt-4.1-mini",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.0000001",completion:"0.0000004"}}, { id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }, { id: "fixture/research:free", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], context_length: 64000, pricing: { prompt: "0", completion: "0" } }] });
+  if (String(url).endsWith("/models")) return Response.json({ data: [{id:"fixture/affordable",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.00000001",completion:"0.00000004"}}, {id:"openai/gpt-4.1-mini",architecture:{input_modalities:["text","image"],output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0.0000001",completion:"0.0000004"}}, { id: "google/gemini-3.8-flash", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"] }, { id: "fixture/research:free", architecture: { output_modalities: ["text"] }, supported_parameters: ["max_tokens", "response_format"], context_length: 64000, pricing: { prompt: "0", completion: "0" } }] });
   if (String(url).endsWith("/key")) return Response.json({ data: { limit_remaining: 100 } });
   assert.ok(String(url).endsWith("chat/completions")); providerCalls++; const body = JSON.parse(options.body);
   if(rejectConfigured && body.model==="openai/gpt-4.1-mini")return Response.json({error:{message:"No endpoints found that can handle the requested parameters"}},{status:404});
   if (!body.stream) return Response.json({ id: "plan-" + providerCalls, choices: [{ message: { content: JSON.stringify({ tools: plannedTools }) }, finish_reason: "stop" }], usage: { cost: body.model.endsWith(":free") ? 0 : .001 } });
   return new Response('data: {"id":"answer-1","choices":[{"delta":{"content":"Original idea. "}}]}\n\ndata: {"choices":[{"delta":{"content":"Review your draft."},"finish_reason":"stop"}],"usage":{"cost":0.001}}\n\ndata: [DONE]\n\n');
  };
- const app = express(); app.use(express.json(), cookieParser()); app.use("/api/ai", researchAgentRouter); app.use(errorHandler); server = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); }); base = `http://127.0.0.1:${server.address().port}/api/ai`;
+ const app = express(); app.use(express.json(), cookieParser()); app.use("/api/ai", aiRouter);app.use("/api/videos",videosRouter); app.use(errorHandler); server = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); }); base = `http://127.0.0.1:${server.address().port}/api/ai`;
 });
 after(async () => { globalThis.fetch = original; server?.closeAllConnections(); if (server) await new Promise(r => server.close(r)); await mongoose.disconnect(); await db?.stop(); });
+beforeEach(async()=>{const {ChatUsage}=await import("../dist/services/chatAccess.js");const {FreeAiUsage}=await import("../dist/services/freeAiLimits.js");await ChatUsage.deleteMany({});await FreeAiUsage.deleteMany({});});
 const headers = { "Content-Type": "application/json", Cookie: "drex_session=agent", "x-csrf-token": "csrf" };
 test("stream parsing emits real chunks and rejects truncated responses", async () => {
  const chunks = []; const result = await readProviderStream(new Response('data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'), s => chunks.push(s)); assert.equal(result.text, "Hello"); assert.deepEqual(chunks, ["Hello"]);
@@ -102,35 +106,52 @@ test("Director lists licensed packs and applies a permitted preset to the same s
  } finally {plannedTools=[];}
 });
 
-test("fast plain chat skips planning and paid continuation settles at one credit",async()=>{
- const {PricingPolicy}=await import("../dist/models/Finance.js");
- await PricingPolicy.updateOne({_id:"global"},{values:{freeUserDailyRequests:1,freeSharedDailyRequests:1,freeSharedMinuteRequests:1}},{upsert:true});
- const before=await Wallet.findOne({userId:user._id}),calls=providerCalls;
- const payload={message:"Hello there",mode:"auto",fastChat:true};
- const {quote}=await (await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)})).json();
- assert.equal(quote.allowed,true);assert.equal(quote.credits,1);assert.equal(quote.model,"openrouter/openai/gpt-4.1-mini");
- const reply=await original(base+"/agent/chat",{method:"POST",headers,body:JSON.stringify({...payload,approvedCredits:1})});assert.match(await reply.text(),/event: done/);
- assert.equal(providerCalls-calls,1);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits-1);
- await PricingPolicy.deleteOne({_id:"global"});
+
+test("all chat modes are free even with zero wallet balance and paid provider continuation",async()=>{
+ const {PricingPolicy}=await import("../dist/models/Finance.js");await PricingPolicy.updateOne({_id:"global"},{values:{freeUserDailyRequests:1,freeSharedDailyRequests:1,freeSharedMinuteRequests:1}},{upsert:true});
+ await Wallet.updateOne({userId:user._id},{$set:{availableCredits:0}});
+ try{
+ const payload={message:"Hello there",mode:"paid",fastChat:true};const {quote}=await (await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)})).json();assert.equal(quote.credits,0);assert.ok(quote.estimatedCostUsd>0);
+ const response=await original(base+"/agent/chat",{method:"POST",headers,body:JSON.stringify({...payload,approvedCredits:0})});assert.match(await response.text(),/event: done/);
+ const wallet=await Wallet.findOne({userId:user._id});assert.equal(wallet.availableCredits,0);
+ const status=await (await original(base+"/agent/limits",{headers})).json();assert.equal(status.used,1);assert.equal(status.windowHours,4);
+ }finally{await PricingPolicy.deleteOne({_id:"global"});}
+});
+test("chat configuration failures return a safe public message without admin details",async()=>{
+ const {ProviderControl}=await import("../dist/models/Admin.js");await ProviderControl.create({provider:"openrouter",model:"openrouter/fixture/research:free",enabled:false});
+ const {PricingPolicy}=await import("../dist/models/Finance.js");await PricingPolicy.updateOne({_id:"global"},{values:{chatMaxProviderUsd:0.000000001}},{upsert:true});
+ try{const response=await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify({message:"Hello",fastChat:true})});const data=await response.json();assert.equal(response.status,503);assert.match(data.error,/temporarily/);assert.doesNotMatch(data.error,/admin|pricing|model|OpenRouter|one-credit/i);}
+ finally{await ProviderControl.deleteMany({});await PricingPolicy.deleteOne({_id:"global"});}
 });
 
- test("fast chat selects a verified affordable alternative when configured fallback is too costly",async()=>{
- const override=await PricingOverride.create({feature:"ai_research_chat",model:"openrouter/openai/gpt-4.1-mini",unit:"request",costUsd:1,verifiedAt:new Date(),verificationUrl:"https://example.test/pricing",expiresAt:new Date(Date.now()+60000)});
- try {
- const payload={message:"Hello there",mode:"auto",fastChat:true};
- const response=await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)});
- const {quote}=await response.json();assert.equal(response.status,200);assert.equal(quote.allowed,true);assert.equal(quote.credits,1);
- assert.equal(quote.requestLimits.fallbacks[0]?.model || quote.model,"openrouter/fixture/affordable");
- }finally{await PricingOverride.deleteOne({_id:override._id});}
- });
+test("legacy chat ignores old paid approvals and never deducts wallet credits",async()=>{
+ const before=await Wallet.findOne({userId:user._id});
+ const response=await original(base+"/chat",{method:"POST",headers,body:JSON.stringify({message:"Hello legacy assistant",approvedCredits:1})});
+ assert.equal(response.status,200,await response.clone().text());assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
+});
+test("saved-script assistant revisions are zero-credit and share the message allowance",async()=>{
+ const project=await AIProject.create({userId:user._id,title:"Owned script",scenes:[{order:1,title:"Opening",narration:"Keep original speech",imagePrompt:"A city",videoMotionPrompt:"Slow camera"}]});
+ const input={projectId:String(project._id),message:"Rewrite Scene 1",settings:{storyTopic:"An original story",targetDuration:"10 seconds",modelMode:"paid"}};
+ const response=await original(base+"/scripts/quote",{method:"POST",headers,body:JSON.stringify(input)});const {quote}=await response.json();assert.equal(response.status,200);assert.equal(quote.credits,0);
+ const before=await Wallet.findOne({userId:user._id});const payload={...input,approvedCredits:0,requestId:"a716a1f4-1681-4bcb-9372-e9303560fe45"};
+ const generated=await original(base+"/scripts/generate",{method:"POST",headers,body:JSON.stringify(payload)});assert.equal(generated.status,202,await generated.clone().text());
+ const again=await original(base+"/scripts/generate",{method:"POST",headers,body:JSON.stringify(payload)});assert.equal(again.status,202);
+ const status=await (await original(base+"/agent/limits",{headers})).json();assert.equal(status.used,1);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
+});
 
-test("parameter routing rejection switches to a prequoted affordable model within one credit",async()=>{
- const {PricingPolicy}=await import("../dist/models/Finance.js");await PricingPolicy.updateOne({_id:"global"},{values:{freeUserDailyRequests:1,freeSharedDailyRequests:1,freeSharedMinuteRequests:1}},{upsert:true});
- rejectConfigured=true;
+test("chat quota cannot be bypassed by a new conversation or paid mode",async()=>{
+ const {PricingPolicy}=await import("../dist/models/Finance.js");await PricingPolicy.updateOne({_id:"global"},{values:{chatMessagesPerWindow:1}},{upsert:true});
  try{
- const payload={message:"Hello again",mode:"auto",fastChat:true};const {quote}=await (await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify(payload)})).json();
- assert.equal(quote.credits,1);assert.ok(quote.requestLimits.fallbacks.some(f=>f.model==="openrouter/fixture/affordable"));
- const before=await Wallet.findOne({userId:user._id});const response=await original(base+"/agent/chat",{method:"POST",headers,body:JSON.stringify({...payload,approvedCredits:1})});const stream=await response.text();assert.match(stream,/event: done/);assert.doesNotMatch(stream,/event: error/);
- assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits-1);
- }finally{rejectConfigured=false;await PricingPolicy.deleteOne({_id:"global"});}
+ const {admitChatMessage}=await import("../dist/services/chatAccess.js");await admitChatMessage(String(user._id));
+ for(const mode of ["auto","paid","free","configured"]){const response=await original(base+"/agent/quote",{method:"POST",headers,body:JSON.stringify({message:"Hello",mode})});const data=await response.json();assert.equal(response.status,429);assert.match(data.error,/four-hour/);assert.ok(data.resetsAt);assert.doesNotMatch(data.error,/admin|pricing|OpenRouter/i);}
+ }finally{await PricingPolicy.deleteOne({_id:"global"});}
+});
+test("image motion suggestion costs zero and shares the four-hour allowance",async()=>{
+ const png=await sharp({create:{width:24,height:24,channels:3,background:"blue"}}).png().toBuffer();
+ const asset=await MediaAsset.create({userId:user._id,type:"image",provider:"upload",storageProvider:"r2",key:"fixture",url:"data:image/png;base64,"+png.toString("base64"),contentType:"image/png",sizeBytes:png.length});
+ const url=base.replace("/api/ai","/api/videos/motion-assistant"),body={sourceImageAssetId:String(asset._id)};
+ const priced=await original(url,{method:"POST",headers,body:JSON.stringify(body)});const data=await priced.json();assert.equal(priced.status,200,JSON.stringify(data));assert.equal(data.quote.credits,0);
+ const before=await Wallet.findOne({userId:user._id});const reply=await original(url,{method:"POST",headers,body:JSON.stringify({...body,approvedCredits:0})});assert.equal(reply.status,200,await reply.clone().text());assert.ok((await reply.json()).prompt);
+ assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
+ const status=await (await original(base+"/agent/limits",{headers})).json();assert.equal(status.used,1);
 });

@@ -1,3 +1,4 @@
+import {freeChatTerms,admitChatMessage,publicChatError} from "../services/chatAccess.js";
 import { scriptsRouter } from "./scripts.js";
 import { researchAgentRouter } from "./researchAgent.js";
 import { ScriptJob } from "../models/ScriptJob.js";
@@ -26,6 +27,7 @@ aiRouter.use(researchAgentRouter);
 aiRouter.use(scriptsRouter);
 
 async function quoteOrReject(feature: string, approvedCredits?: number, userId?: any) {
+  if(feature==="ai_research_chat")return freeChatTerms(String(userId),1);
   const quote = await approvedTerms(userId, { feature }, approvedCredits!, async () => createQuote({ feature, provider: providerFor(await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL))), model: await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL)), quantity: 1 }));
   if (!quote.allowed) throw new Error(quote.reason ?? "AI pricing is unavailable");
   if (approvedCredits !== quote.credits) throw new Error(`Approve ${quote.credits} credit before running this AI action`);
@@ -34,6 +36,7 @@ async function quoteOrReject(feature: string, approvedCredits?: number, userId?:
 
 aiRouter.post("/quote", async (req, res) => {
   const feature = String(req.body.feature);
+  if(feature==="ai_research_chat"){try{return res.json({quote:await freeChatTerms(String(req.user._id),1)});}catch(e:any){return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});}}
   res.json({ quote: await rememberQuote(req.user._id, { feature: req.body.feature }, await createQuote({ feature: req.body.feature, provider: providerFor(await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL))), model: await defaultModel(feature, await defaultModel("text", env.GEMINI_MODEL)), quantity: 1 })) });
 });
 
@@ -42,6 +45,7 @@ aiRouter.post("/chat", async (req, res, next) => {
   try {
     const input = z.object({ conversationId: z.string().optional(), message: z.string().min(2), projectId: z.string().optional(), nicheId: z.string().optional(), approvedCredits: z.number() }).parse(req.body);
     const quote = await quoteOrReject("ai_research_chat", input.approvedCredits, req.user._id);
+    await admitChatMessage(String(req.user._id));
     reservation = await reserveCredits(String(req.user._id), quote, `ai-chat:${randomToken(8)}`);
     const conversation = input.conversationId ? await AIConversation.findOne({ _id: input.conversationId, userId: req.user._id }) : await AIConversation.create({ userId: req.user._id, projectId: input.projectId, nicheId: input.nicheId, messages: [] });
     if (!conversation) return res.status(404).json({ error: "Conversation not found" });
@@ -58,7 +62,7 @@ aiRouter.post("/chat", async (req, res, next) => {
     res.json({ conversation, answer });
   } catch (error) {
     if (reservation?._id) await releaseReservation(String(reservation._id), "ai_chat_failed").catch(() => null);
-    next(error);
+    res.status((error as any).statusCode||503).json({error:publicChatError(error),resetsAt:(error as any).resetsAt});
   }
 });
 

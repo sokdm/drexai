@@ -1,3 +1,4 @@
+import {publicChatError} from "./chatAccess.js";
 import { z } from "zod";
 import { ScriptJob } from "../models/ScriptJob.js";
 import { AIProject } from "../models/AIProject.js";
@@ -133,7 +134,7 @@ export async function processScriptJob(job: any, request = routerText) {
   const freeOnly = quote.estimatedCostUsd === 0 && !(quote.requestLimits?.fallbacks || []).some((f:any) => !f.model.endsWith(":free"));
   const timedOut = /abort|timeout|timed out/i.test(error.message);
   const uncertain = !freeOnly && (error.billingUncertain === true || /abort|timeout|network|fetch failed/i.test(error.message));
-  const failureMessage = timedOut ? (freeOnly ? "Free script provider timeout: no response arrived before the deadline. Saved scenes are preserved and your reserved credits have been released. Try again or select a paid model." : "Script provider timeout: no response arrived before the deadline. Saved scenes are preserved. This request needs billing review before retrying to prevent duplicate charges.") : error.message;
+  const failureMessage = quote.feature === "ai_research_chat" ? publicChatError(error) : timedOut ? (freeOnly ? "Free script provider timeout: no response arrived before the deadline. Saved scenes are preserved and your reserved credits have been released. Try again or select a paid model." : "Script provider timeout: no response arrived before the deadline. Saved scenes are preserved. This request needs billing review before retrying to prevent duplicate charges.") : error.message;
   await log(job, "error", failureMessage);
   if (error.code === "INCOMPLETE_PROVIDER_OUTPUT") await ScriptJob.updateOne({ _id: job._id }, { outputFailure: { finishReason: error.finishReason, maxOutputTokens: error.maxOutputTokens, usage: error.usage, requestId: error.requestId } });
   await ScriptJob.updateOne({ _id: job._id }, { status: uncertain ? "needs_review" : "failed", error: failureMessage });

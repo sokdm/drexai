@@ -1,3 +1,4 @@
+import {freeChatTerms,admitChatMessage,chatStatus,publicChatError} from "../services/chatAccess.js";
 import {executeProductionTool,productionToolNames} from "../services/agentTools.js";
 import {studioSettingsSchema} from "../services/studioPlan.js";
 import { Wallet } from "../models/Wallet.js";
@@ -21,57 +22,26 @@ import { searchVideos, resolveChannel } from "../services/youtube.js";
 
 export const researchAgentRouter = Router();
 researchAgentRouter.use(requireAuth, requireCsrf);
-const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch(next);
+const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch((e:any)=>{console.warn("Assistant availability",e.code||e.statusCode||"unavailable");res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});});
 const id = z.string().regex(/^[a-f\d]{24}$/i);
 const inputSchema = z.object({ fastChat: z.boolean().default(false), mode: z.enum(["auto", "configured", "free", "paid"]).default("configured"), message: z.string().trim().min(2).max(6000), conversationId: id.optional(), productionId: id.optional(), projectId:id.optional(), productionSettings:studioSettingsSchema.optional(), allowTimelineEdits: z.boolean().default(false), draftProject: z.boolean().default(false) });
 const planSchema = z.object({ tools: z.array(z.object({ name: z.enum(["search_videos", "lookup_channel", ...productionToolNames]), query: z.string().min(1).max(150) })).max(2) });
 researchAgentRouter.get("/agent/conversations", wrap(async (req: any, res: any) => res.json({ conversations: await AIConversation.find({ userId: req.user._id }).select("title updatedAt projectId").sort({ updatedAt: -1 }).limit(50) })));
 researchAgentRouter.get("/agent/conversations/:id", wrap(async (req: any, res: any) => { const conversation = await AIConversation.findOne({ _id: id.parse(req.params.id), userId: req.user._id }); if (!conversation) return res.status(404).json({ error: "Conversation not found" }); res.json({ conversation }); }));
-async function price(input: any, userId?: string) {
- if(input.fastChat && !input.draftProject) {
-  const { routerCatalog } = await import("../services/openrouter.js");
-  const configured="openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL;
-  const catalog=await routerCatalog("text");
-  const compatible=catalog.filter((m:any)=>!m.id.endsWith(":free") && m.architecture?.output_modalities?.includes("text") && m.supported_parameters?.includes("max_tokens") && m.supported_parameters?.includes("response_format"));
-  compatible.sort((a:any,b:any)=>(Number(a.pricing?.prompt)*6000+Number(a.pricing?.completion)*1200)-(Number(b.pricing?.prompt)*6000+Number(b.pricing?.completion)*1200));
-  const candidates=[configured,...compatible.map((m:any)=>"openrouter/"+m.id)];
-  let paid:any,paidModel:string|undefined,approvedCostUsd=0,maxInputTokens=6000,maxOutputTokens=1200;const paidOptions:any[]=[];
-  for(const model of [...new Set(candidates)].slice(0,8)) {
-   try {
-    const quote:any=await createQuote({feature:"ai_research_chat",model,provider:"openrouter",quantity:2,settings:{fastChat:true,singleModel:true}});
-    if(quote.allowed && Number(quote.protectedCostUsd)<=Number(quote.netCreditUsd)){
-     if(!paidModel)paidModel=model;
-     if(paid && quote.pricingVersion!==paid.pricingVersion)continue;
-     paidOptions.push({model,maxPrice:quote.requestLimits.maxPrice});
-     if(!paid)paid=quote;
-     approvedCostUsd=Math.max(approvedCostUsd,Number(quote.estimatedCostUsd));
-     maxInputTokens=Math.min(maxInputTokens,quote.requestLimits.maxInputTokens);maxOutputTokens=Math.min(maxOutputTokens,quote.requestLimits.maxOutputTokens);
-     if(paidOptions.length===3)break;
-    }
-   }catch{/* Never send an unverified or unaffordable model. */}
-  }
-  const wallet=await Wallet.findOne({userId});
-  let freeModel:string|undefined;
-  try{const {freeAiAvailable}=await import("../services/freeAiLimits.js");if(userId&&await freeAiAvailable(userId,2))freeModel=await (await import("../services/assistantRouting.js")).assistantModel("ai_research_chat","free");}catch{}
-  if(!paid) {if(freeModel)return createQuote({feature:"ai_research_chat",model:freeModel,provider:"openrouter",quantity:2,settings:{fastChat:true}});throw new Error("No verified text model currently fits the one-credit budget. Review chat operating costs in Admin pricing.");}
-  if(!wallet||wallet.availableCredits<1) {if(freeModel)return createQuote({feature:"ai_research_chat",model:freeModel,provider:"openrouter",quantity:2});throw new Error("Add one credit to continue with the fast assistant.");}
-  return {...paid,estimatedCostUsd:approvedCostUsd,credits:1,model:freeModel||paidModel,pricingSource:"bounded-one-credit-chat",requestLimits:{...paid.requestLimits,maxInputTokens,maxOutputTokens,maxPrice:freeModel?{prompt:0,completion:0,request:0}:paidOptions[0].maxPrice,fallbacks:freeModel?paidOptions:paidOptions.slice(1),freeDeadlineMs:8000,approvedCostUsd},fastChat:true};
- }
- const model = await (await import("../services/assistantRouting.js")).assistantModel("ai_research_chat", input.mode, userId, input.draftProject ? 3 : 2);
- if (!isOpenRouter(model)) throw new Error("Choose an OpenRouter text model for Research chat in Admin / Providers to enable the streaming research agent. Existing direct chat is preserved.");
- return createQuote({ feature: "ai_research_chat", model, provider: providerFor(model), quantity: input.draftProject ? 3 : 2 });
-}
+async function price(input:any,userId?:string){return freeChatTerms(userId!,input.draftProject?3:2,input.draftProject);}
+researchAgentRouter.get("/agent/limits",wrap(async(req:any,res:any)=>res.json(await chatStatus(String(req.user._id)))));
 researchAgentRouter.post("/agent/quote", wrap(async (req: any, res: any) => { const input = inputSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, input, await price(input, String(req.user._id))) }); }));
 researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
  const input = inputSchema.parse(req.body), approvedCredits = z.number().int().nonnegative().parse(req.body.approvedCredits);
  let conversation: any, reservation: any, heartbeat: ReturnType<typeof setInterval> | undefined;
  const send = (event: string, data: any) => { if (!res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
  try {
-  const terms = await approvedTerms(req.user._id, input, approvedCredits, () => price(input, String(req.user._id)));
+  const terms = await price(input,String(req.user._id));
   if (!terms.allowed || terms.credits !== approvedCredits) throw new Error("Review the current cost before starting research");
   if (input.conversationId) conversation = await AIConversation.findOneAndUpdate({ _id: input.conversationId, userId: req.user._id, $or: [{ activeUntil: null }, { activeUntil: { $lt: new Date() } }] }, { $set: { activeUntil: new Date(Date.now() + 600000) } }, { new: true });
   else conversation = await AIConversation.create({ userId: req.user._id, title: input.message.slice(0, 70), activeUntil: new Date(Date.now() + 600000), messages: [] });
   if (!conversation) return res.status(409).json({ error: "This conversation is busy or no longer accessible. Wait for its current response, then retry." });
+  await admitChatMessage(String(req.user._id));
   reservation = await reserveCredits(String(req.user._id), terms, `agent:${conversation._id}:${Date.now()}`);
   conversation.messages.push({ role: "user", content: input.message }); await conversation.save();
   res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" }); res.flushHeaders();
@@ -96,7 +66,7 @@ researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
     send("tool",{name:tool.name,status:"completed",result:JSON.stringify(result).slice(0,12000)});
     evidence.push({ tool, result: JSON.stringify(result).slice(0, 12000) });
    }
-   catch (error: any) { send("tool",{name:tool.name,status:"failed",message:error.message}); if (production) await StudioEvent.create({ productionId: production._id, userId: req.user._id, level: "failure", message: tool.name + ": " + error.message }); evidence.push({ tool, error: error.message }); send("progress", { text: "A tool failed; continuing with the available evidence" }); }
+   catch (error: any) { const detail=/admin|pricing|api[_ -]?key|credentials|configured|redis|openrouter|provider/i.test(error.message)?publicChatError(error):error.message;send("tool",{name:tool.name,status:"failed",message:detail}); if (production) await StudioEvent.create({ productionId: production._id, userId: req.user._id, level: "failure", message: tool.name + ": " + detail }); evidence.push({ tool, error: detail }); send("progress", { text: "A tool failed; continuing with the available evidence" }); }
   }
   let project: any;
   if (input.draftProject) {
@@ -114,6 +84,6 @@ researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
   await settleReservation(String(reservation._id)); send("done", { conversationId: conversation._id });
  } catch (error: any) {
   if (reservation) await releaseReservation(String(reservation._id), "research_agent_failed");
-  if (res.headersSent) send("error", { message: error.message }); else return res.status(400).json({ error: error.message });
+  if (res.headersSent) send("error", { message: publicChatError(error),resetsAt:error.resetsAt }); else return res.status(error.statusCode||503).json({ error: publicChatError(error),resetsAt:error.resetsAt });
  } finally { clearInterval(heartbeat); if (conversation) await AIConversation.updateOne({ _id: conversation._id }, { $unset: { activeUntil: "" } }); if (res.headersSent) res.end(); }
 }));

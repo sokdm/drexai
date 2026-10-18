@@ -1,3 +1,4 @@
+import {freeChatTerms,admitChatMessage,publicChatError} from "../services/chatAccess.js";
 import { Router } from "express";
 import { z } from "zod";
 import { ScriptJob } from "../models/ScriptJob.js";
@@ -11,7 +12,7 @@ import { scriptSettings, scriptShape } from "../services/scriptProduction.js";
 import { env } from "../config/env.js";
 import { AIConversation } from "../models/AIConversation.js";
 export const scriptsRouter = Router();
-const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch(next);
+const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch((e:any)=>{if(req.body?.projectId&&req.body?.message)return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});next(e);});
 const id = z.string().regex(/^[a-f0-9]{24}$/i);
 const inputSchema = z.object({ settings: scriptSettings, projectId: id.optional(), message: z.string().trim().min(2).max(2000).optional() });
 async function normalize(userId: any, input: any) {
@@ -32,21 +33,23 @@ async function normalize(userId: any, input: any) {
  return { ...input, settings: { ...input.settings, sceneCount: Math.max(1,count), ...(longer ? { targetDuration: Math.min(30, original.seconds / 60 * 1.5) + " minutes" } : {}) } };
 }
 async function terms(input: any, userId?: string) {
+ if(input.projectId && input.message)return freeChatTerms(userId!,scriptShape(input.settings).calls,true);
  const model = await (await import("../services/assistantRouting.js")).assistantModel("story_generation", input.settings.modelMode, userId, scriptShape(input.settings).calls);
  if (!model.startsWith("openrouter/")) throw new Error("Select an OpenRouter model for Story generation in Admin / Providers. Script Builder no longer submits direct-provider requests.");
  return createQuote({ feature: "story_generation", provider: "openrouter", model, quantity: scriptShape(input.settings).calls });
 }
-scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); res.json({ quote: await rememberQuote(req.user._id, input, await terms(input, String(req.user._id))), stages: scriptShape(input.settings) }); }));
+scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); try{res.json({ quote: await rememberQuote(req.user._id, input, await terms(input, String(req.user._id))), stages: scriptShape(input.settings) });}catch(e:any){if(input.projectId&&input.message)return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});throw e;} }));
 scriptsRouter.post("/scripts/generate", wrap(async (req: any, res: any) => {
  const requestId = z.string().uuid().parse(req.body.requestId), input = await normalize(req.user._id, inputSchema.parse(req.body));
  const prior = await ScriptJob.findOne({ userId: req.user._id, requestId }); if (prior) return res.status(202).json({ job: prior });
  const snapshot = input.projectId ? await AIProject.findOne({ _id: input.projectId, userId: req.user._id }) : null;
  if (input.projectId && !snapshot) return res.status(404).json({ error: "Project not found" });
- const approvedCredits = z.number().nonnegative().parse(req.body.approvedCredits), quote = await approvedTerms(req.user._id, input, approvedCredits, () => terms(input, String(req.user._id)));
+ const approvedCredits = z.number().nonnegative().parse(req.body.approvedCredits), quote = input.projectId && input.message ? await terms(input,String(req.user._id)) : await approvedTerms(req.user._id, input, approvedCredits, () => terms(input, String(req.user._id)));
  if (!quote.allowed || quote.credits !== approvedCredits) throw new Error("Review and approve the full current script quote");
+ if(input.projectId && input.message)await admitChatMessage(String(req.user._id),"script:"+requestId);
  const reservation = await reserveCredits(String(req.user._id), quote, `script:${req.user._id}:${requestId}`);
  try {
- const job = await ScriptJob.create({ userId: req.user._id, requestId, status: "queued", input: { ...input, snapshot: snapshot?.toObject() }, baseUpdatedAt: snapshot?.updatedAt, quote, reservationId: reservation._id, logs: [{ stage: "waiting", message: "Credit approval recorded. Waiting for the script worker.", at: new Date() }] });
+ const job = await ScriptJob.create({ userId: req.user._id, requestId, status: "queued", input: { ...input, snapshot: snapshot?.toObject() }, baseUpdatedAt: snapshot?.updatedAt, quote, reservationId: reservation._id, logs: [{ stage: "waiting", message: input.projectId && input.message ? "Free assistant revision queued." : "Credit approval recorded. Waiting for the script worker.", at: new Date() }] });
  res.status(202).json({ job });
  } catch (e: any) { if (e.code === 11000) return res.status(202).json({ job: await ScriptJob.findOne({ userId: req.user._id, requestId }) }); await releaseReservation(String(reservation._id), "script_setup_failed"); throw e; }
 }));

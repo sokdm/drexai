@@ -1,3 +1,4 @@
+import {admitChatMessage,publicChatError} from "../services/chatAccess.js";
 import {ensureProductionEdit} from "../services/sharedEditing.js";
 import {executeTimelineTool} from "../services/editorToolExecution.js";
 import mongoose from "mongoose";
@@ -94,7 +95,8 @@ editorRouter.post("/edits/:id/suggestions", wrap(async (req, res) => { await own
 editorRouter.post("/edits/:id/command", rateLimit({ windowMs: 60000, limit: 6 }), wrap(async (req, res) => {
  const edit = await own(req), input = z.object({ message: z.string().min(3).max(1000), timeline: timelineSchema, revision: z.number().int().nonnegative() }).parse(req.body);
  if (input.revision !== edit.revision) editorFail("This edit changed in another tab. Reload before applying a command.", 409);
- const result=await executeTimelineTool(String(req.user._id),input.message,input.timeline);
+ try{await admitChatMessage(String(req.user._id));}catch(e:any){return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});}
+ let result;try{result=await executeTimelineTool(String(req.user._id),input.message,input.timeline);}catch(e:any){if(/configured|credentials|redis|provider|api[_ -]?key|ffmpeg.*(?:missing|not found|unavailable)/i.test(e.message))return res.status(503).json({error:publicChatError(e)});throw e;}
  // Return a revision-bound proposal; the existing undo/save workflow owns commit.
  res.json({ ...result, revision: edit.revision, note: "Applied to the editor preview. Undo or save this change using the existing timeline controls. No AI provider request or credit charge was made." });
 }));

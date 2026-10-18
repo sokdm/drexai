@@ -18,7 +18,8 @@ export async function freeAiStatus(now = new Date()) {
 export async function freeAiAvailable(userId: string, requests = 1) {
  const now = new Date(), status = await freeAiStatus(now);
  const scope = createHash("sha256").update(env.OPENROUTER_API_KEY || "unconfigured").digest("hex").slice(0,24);
- const user = await FreeAiUsage.findById(`${scope}:user:${userId}:${now.toISOString().slice(0,10)}`).lean();
+ const window=Math.floor(now.getTime()/(4*60*60*1000));
+ const user = await FreeAiUsage.findById(`${scope}:user:${userId}:four-hour:${window}`).lean();
  return (user?.count || 0)+requests <= status.userDayLimit && status.dayRequests+requests <= status.dayLimit && status.minuteRequests+requests <= status.minuteLimit;
 }
 export async function admitFreeAi(userId?: string, now = new Date()) {
@@ -27,7 +28,7 @@ export async function admitFreeAi(userId?: string, now = new Date()) {
  const scope = createHash("sha256").update(env.OPENROUTER_API_KEY || "unconfigured").digest("hex").slice(0, 24);
  const day = now.toISOString().slice(0, 10), minute = now.toISOString().slice(0, 16);
  const buckets = [
-  { id: `${scope}:user:${userId}:${day}`, limit: values.freeUserDailyRequests },
+  { id: `${scope}:user:${userId}:four-hour:${Math.floor(now.getTime()/(4*60*60*1000))}`, limit: values.freeUserDailyRequests },
   { id: `${scope}:day:${day}`, limit: values.freeSharedDailyRequests },
   { id: `${scope}:minute:${minute}`, limit: values.freeSharedMinuteRequests }
  ];
@@ -40,7 +41,7 @@ export async function admitFreeAi(userId?: string, now = new Date()) {
   await session.withTransaction(async () => {
    for (const b of buckets) {
     const result = await FreeAiUsage.updateOne({ _id: b.id, count: { $lt: b.limit } }, { $inc: { count: 1 } }, { session });
-    if (result.modifiedCount !== 1) throw Object.assign(new Error("Free AI request limit reached. Wait for the limit to reset, or select a paid model and approve its credit quote. No paid request was submitted."), { code: "FREE_AI_LIMIT", status: 429 });
+    if (result.modifiedCount !== 1) throw Object.assign(new Error("Free AI request limit reached. Please wait for free capacity to reset."), { code: "FREE_AI_LIMIT", status: 429 });
    }
   });
  } finally { await session.endSession(); }
