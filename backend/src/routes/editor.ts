@@ -38,7 +38,7 @@ async function own(req: Request) { const edit = await VideoEdit.findOne({ _id: i
 async function ownExport(req: Request) { const job = await VideoExport.findOne({ _id: idSchema.parse(req.params.exportId), userId: req.user._id }); if (!job) editorFail("Export not found", 404); return job!; }
 function publicAsset(asset: any) { return { _id: asset._id, type: asset.type, width: asset.width, height: asset.height, durationSeconds: asset.durationSeconds, prompt: asset.prompt, sceneId: asset.sceneId, metadata: asset.metadata }; }
 async function readiness() {
-  const worker = await RenderWorker.findOne({ _id: "ffmpeg", expiresAt: { $gt: new Date() } }).lean();
+  const worker = await RenderWorker.findOne({ _id: { $in: ["ffmpeg", "ffmpeg-web"] }, expiresAt: { $gt: new Date() } }).lean();
   return { queueEnabled: env.RENDER_QUEUE_ENABLED, storageConfigured: persistentStorageConfigured(), workerOnline: Boolean(worker), capabilities: worker?.capabilities ?? { resolutions: ["480p", "720p", "1080p"], formats: ["mp4"] } };
 }
 editorRouter.get("/config", wrap(async (req, res) => {

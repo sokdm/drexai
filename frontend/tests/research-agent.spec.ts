@@ -13,6 +13,9 @@ for (const width of [390, 1440]) test(`research chat quotes, streams, and resume
  page.on("dialog",d=>d.accept());
  await page.getByRole("button", { name: "Send", exact: true }).click();
  await expect(page.getByText("Evidence based content idea.", { exact: true })).toBeVisible(); expect(calls).toBe(1);
+ await expect(page.getByLabel("Message YouTube Chef")).toHaveValue("");
+ await expect(page.getByRole("checkbox")).toHaveCount(0);
+ const composer = await page.getByLabel("Message YouTube Chef").boundingBox(); expect(composer!.height).toBeLessThanOrEqual(88);
  if (width > 800) { await page.getByRole("button", { name: "Saved research" }).click(); await expect(page.getByText("Saved answer", { exact: true })).toBeVisible(); }
  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
  await page.screenshot({ path: info.outputPath(`research-agent-${width}.png`), fullPage: true });

@@ -35,7 +35,7 @@ test("verified free quotes stay zero and execute without a paid fallback",async(
  const record={id:"fixture/compatible:free",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens","response_format"],context_length:64000,pricing:{prompt:"0",completion:"0",request:"0"}};
  let calls=0;
  globalThis.fetch=async(url,options)=>{
-  if(String(url).endsWith("/models"))return Response.json({data:[record]});
+  if(String(url).endsWith("/models"))return Response.json({data:[record,{id:"fixture/paid",architecture:{output_modalities:["text"]},supported_parameters:["max_tokens"],pricing:{prompt:"0.0000001",completion:"0.0000001"}}]});
   assert.equal(String(url),"https://openrouter.ai/api/v1/chat/completions");
   const body=JSON.parse(options.body);assert.equal(body.model,record.id);assert.equal(body.provider.allow_fallbacks,false);calls++;
   return Response.json({id:"free-fixture",choices:[{message:{content:"A real fixture reply"},finish_reason:"stop"}],usage:{cost:0}});
@@ -51,4 +51,10 @@ test("verified free quotes stay zero and execute without a paid fallback",async(
 test("automatic routing selects free first and switches at the shared quota without calling a paid provider",async()=>{
  const {assistantModel}=await import("../dist/services/assistantRouting.js");const saved=env.OPENROUTER_API_KEY;env.OPENROUTER_API_KEY="fixture-key";
  try{await FreeAiUsage.deleteMany({});assert.equal(await assistantModel("ai_research_chat","auto",user,2),"openrouter/fixture/compatible:free");await admitFreeAi(user);await admitFreeAi(user);assert.equal(await assistantModel("ai_research_chat","auto",user,2),"openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL);}finally{env.OPENROUTER_API_KEY=saved;}
+});
+
+test("a slow free request falls back only within approved terms",async()=>{
+ await FreeAiUsage.deleteMany({});const original=globalThis.fetch,key=env.OPENROUTER_API_KEY;env.OPENROUTER_API_KEY="fixture-key";let attempts=[];
+ globalThis.fetch=async(url,options)=>{const body=JSON.parse(options.body);attempts.push(body.model);if(body.model.endsWith(":free"))throw new DOMException("timed out","TimeoutError");return Response.json({id:"paid-fallback-test",choices:[{message:{content:"Fast reply"},finish_reason:"stop"}],usage:{cost:.0001}});};
+ try{assert.equal(await routerText({model:"openrouter/fixture/compatible:free",userId:user,system:"Help",prompt:"Hello",requestLimits:{maxInputTokens:1000,maxOutputTokens:1000,freeDeadlineMs:20,approvedCostUsd:.01,fallbacks:[{model:"openrouter/fixture/paid",maxPrice:{prompt:1,completion:1}}]}}),"Fast reply");assert.deepEqual(attempts,["fixture/compatible:free","fixture/paid"]);}finally{globalThis.fetch=original;env.OPENROUTER_API_KEY=key;}
 });

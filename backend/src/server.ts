@@ -1,3 +1,4 @@
+import { startRenderFallback } from "./services/renderFallback.js";
 import { startScriptWorker } from "./services/scriptProduction.js";
 import { startMongoGenerationFallback } from "./services/generationDispatch.js";
 import { WebsiteSettings } from "./models/Finance.js";
@@ -85,4 +86,5 @@ startNotificationWorker();
 startProviderMonitor();
 startMongoGenerationFallback();
 startScriptWorker();
+startRenderFallback();
 httpServer.listen(env.PORT, () => console.log(`Drex API listening on ${env.PORT}`));

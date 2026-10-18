@@ -56,17 +56,21 @@ export async function recordRouterUsage(id: string, kind: string, data: any, use
   const requestId = data.id || data.generation_id, values = { model: id, kind, userId, reservationId, ...(requestId ? { requestId } : {}), usage: { ...(data.usage || {}), ...(data.choices?.[0]?.finish_reason ? { finish_reason: data.choices[0].finish_reason } : {}) }, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-type TextInput = { reasoningEffort?: "low"; timeoutMs?: number; reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
+type TextInput = { reasoningEffort?: "low"; timeoutMs?: number; reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { freeDeadlineMs?: number; maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any }[] } };
 export async function routerText(input: TextInput) {
  const { withProvider, assertProviderBudget } = await import("./platformControl.js");
  const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(!input.media?.length ? input.requestLimits?.fallbacks || [] : [])];
  for (let index = 0; index < candidates.length; index++) {
   const candidate = candidates[index];
+  const free = input.requestLimits?.freeDeadlineMs ? (await import("./freeAiLimits.js")).verifiedFreeText(await verifiedRouterModel(candidate.model,"text")) : false;
+  let emitted=false;
   try {
    if (index) await assertProviderBudget(candidate.model, (input.requestLimits as any)?.approvedCostUsd);
-   return await withProvider(candidate.model, () => routerTextAttempt({ ...input, model: candidate.model, requestLimits: input.requestLimits ? { ...input.requestLimits, maxPrice: candidate.maxPrice } : undefined }));
+   return await withProvider(candidate.model, () => routerTextAttempt({ ...input, timeoutMs: free ? input.requestLimits!.freeDeadlineMs : input.timeoutMs, ...(input.onDelta ? {onDelta:(text:string)=>{if(text)emitted=true;input.onDelta!(text);}} : {}), model: candidate.model, requestLimits: input.requestLimits ? { ...input.requestLimits, maxPrice: candidate.maxPrice } : undefined }));
   } catch (error: any) {
-   if (index === candidates.length - 1 || !error.providerRejected || ![404, 429, 503].includes(error.status)) throw error;
+   const freeTimeout=free && !emitted && /abort|timeout|timed out/i.test(error.message);
+   const freeQuota=free && (error.code === "FREE_AI_LIMIT" || error.code === "INCOMPLETE_PROVIDER_OUTPUT");
+   if (index === candidates.length - 1 || emitted || !(freeTimeout || freeQuota || error.providerRejected && [404,429,503].includes(error.status))) throw error;
   }
  }
  throw new Error("No approved text model is available");
