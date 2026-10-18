@@ -1,3 +1,5 @@
+import {ensureProductionEdit} from "../services/sharedEditing.js";
+import {executeTimelineTool} from "../services/editorToolExecution.js";
 import mongoose from "mongoose";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
@@ -65,8 +67,7 @@ editorRouter.post("/edits", wrap(async (req, res) => {
   if (!edit) {
     const production = await StudioProduction.findOne({ _id: productionId, userId: req.user._id }).lean();
     if (!production) editorFail("Production not found", 404);
-    const timeline = roughCut(production); await validateTimelineAssets(timeline, String(req.user._id));
-    edit = await VideoEdit.findOneAndUpdate({ userId: req.user._id, productionId }, { $setOnInsert: { userId: req.user._id, productionId, projectId: production!.projectId, title: production!.title || "Untitled edit", timeline, revision: 0 } }, { upsert: true, new: true });
+    edit=await ensureProductionEdit(production);
   }
   await AIProject.updateOne({ _id: edit!.projectId, userId: req.user._id }, { $set: { latestEditId: edit!._id } });
   res.status(201).json({ edit });
@@ -93,28 +94,7 @@ editorRouter.post("/edits/:id/suggestions", wrap(async (req, res) => { await own
 editorRouter.post("/edits/:id/command", rateLimit({ windowMs: 60000, limit: 6 }), wrap(async (req, res) => {
  const edit = await own(req), input = z.object({ message: z.string().min(3).max(1000), timeline: timelineSchema, revision: z.number().int().nonnegative() }).parse(req.body);
  if (input.revision !== edit.revision) editorFail("This edit changed in another tab. Reload before applying a command.", 409);
- const assets = await validateTimelineAssets(input.timeline, String(req.user._id));
- const result = /silent|silence/i.test(input.message) ? await withProvider("ffmpeg", async () => {
-   await checkGenerationUser(String(req.user._id));
-   const total = input.timeline.clips.reduce((n, c) => n + c.duration, 0);
-   if (!total || total > 300) editorFail("Silence analysis currently supports edits up to five minutes. Split longer edits first.");
-   const directory = await mkdtemp(path.join(tmpdir(), "drex-silence-"));
-   try {
-     const sources = new Map<string, string>();
-     let sourceBytes = 0;
-     for (const asset of assets) {
-       if ((asset.sizeBytes || 0) > 250 * 1024 * 1024) editorFail("Source exceeds the silence analysis size limit");
-       const bytes = await editorAssetBytes(asset); sourceBytes += bytes.length;
-       if (bytes.length > 250 * 1024 * 1024 || sourceBytes > 500 * 1024 * 1024) editorFail("Sources exceed the silence analysis size limit");
-       const file = path.join(directory, String(asset._id)); await writeFile(file, bytes); sources.set(String(asset._id), file);
-     }
-     const rendered = await renderTimeline(input.timeline, { format: "mp4", resolution: "480p", quality: "draft", filename: "silence-analysis" }, sources, directory);
-     const log = await runMedia("ffmpeg", ["-hide_banner", "-nostdin", "-i", rendered.file, "-vn", "-af", "silencedetect=noise=-35dB:d=0.6", "-f", "null", "-"], { includeStderr: true, stderrLimit: 2 * 1024 * 1024 });
-     const ranges = speechRanges(log, total), timeline = retainTimelineRanges(input.timeline, ranges);
-     return { timeline, explanation: `Removed ${(total - timeline.clips.reduce((n, c) => n + c.duration, 0)).toFixed(2)} seconds below -35 dB lasting at least 0.6 seconds, preserving 0.12-second handles. All audio and captions were cut with the video. Music can mask silence; review and undo if needed.` };
-   } finally { await rm(directory, { recursive: true, force: true }); }
- }) : editingCommand(input.timeline, input.message, captionsFromTranscript(input.timeline, assets));
- await validateTimelineAssets(result.timeline, String(req.user._id));
+ const result=await executeTimelineTool(String(req.user._id),input.message,input.timeline);
  // Return a revision-bound proposal; the existing undo/save workflow owns commit.
  res.json({ ...result, revision: edit.revision, note: "Applied to the editor preview. Undo or save this change using the existing timeline controls. No AI provider request or credit charge was made." });
 }));

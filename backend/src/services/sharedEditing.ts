@@ -1,3 +1,4 @@
+import {executeTimelineTool} from "./editorToolExecution.js";
 import { VideoEdit } from "../models/VideoEdit.js";
 import { AIProject } from "../models/AIProject.js";
 import { roughCut, validateTimelineAssets, captionsFromTranscript } from "./videoEditing.js";
@@ -22,7 +23,7 @@ export async function applyProductionEdit(production: any, message: string, revi
  const edit = await ensureProductionEdit(production);
  if (edit.revision !== revision) throw Object.assign(new Error("The timeline changed in the manual editor. Refresh before applying this command."), { statusCode: 409 });
  const assets = await validateTimelineAssets(edit.timeline, String(production.userId));
- const proposal = editingCommand(edit.timeline, message, captionsFromTranscript(edit.timeline, assets));
+ const proposal = await executeTimelineTool(String(production.userId), message, edit.timeline);
  await validateTimelineAssets(proposal.timeline, String(production.userId));
  const updated = await VideoEdit.findOneAndUpdate({ _id: edit._id, userId: production.userId, revision }, { $set: { timeline: proposal.timeline }, $inc: { revision: 1 } }, { new: true });
  if (!updated) throw Object.assign(new Error("Another editor changed this timeline. Refresh and retry."), { statusCode: 409 });

@@ -28,12 +28,12 @@ export async function pollRouterVideo(operationName: string, timeout = 12 * 6000
   }
   throw new Error("OpenRouter video polling timed out. Resume the saved operation; do not submit a duplicate generation.");
 }
-export async function downloadRouterVideo(operation: any, userId?: string, model?: string) {
+export async function downloadRouterVideo(operation: any, userId?: string, model?: string, reservationId?:string) {
   const id = String(operation.name).slice("openrouter:".length);
   const response = await downloadRouterContent(id);
   const buffer = Buffer.from(await response.arrayBuffer());
   const metadata = await inspectNativeVideo(buffer);
-  await recordRouterUsage(model || (operation.response.openrouter.model ? "openrouter/" + operation.response.openrouter.model : "openrouter/google/veo-3.1"), "video", operation.response.openrouter, userId);
+  await recordRouterUsage(model || (operation.response.openrouter.model ? "openrouter/" + operation.response.openrouter.model : "openrouter/google/veo-3.1"), "video", operation.response.openrouter, userId, reservationId);
   return [{ buffer, contentType: "video/mp4", metadata: { ...metadata, gateway: "openrouter", usage: operation.response.openrouter.usage } }];
 }
 

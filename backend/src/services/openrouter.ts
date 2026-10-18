@@ -116,7 +116,7 @@ export async function routerImages(settings: any) {
     if (refs.length) body.input_references = refs.map((image: any) => ({ type: "image_url", image_url: { url: `data:${image.contentType};base64,${image.data}` } }));
     if (settings.background) { checkCapability(record, "background", settings.background); body.background = settings.background; }
     const response = await routerResponse("images", body), data = await response.json();
-    await recordRouterUsage(settings.model, "image", data, settings.userId);
+    await recordRouterUsage(settings.model, "image", data, settings.userId, settings.reservationId);
     if (!data.data?.[0]?.b64_json) throw new Error("OpenRouter returned no image bytes");
     const buffer = Buffer.from(data.data[0].b64_json, "base64"), meta = await sharp(buffer, { limitInputPixels: 40000000 }).metadata();
     if (!["png", "jpeg", "webp"].includes(meta.format || "")) throw new Error("OpenRouter returned an unsupported image format");
@@ -137,7 +137,7 @@ export async function routerSpeech(settings: any) {
     const source = path.join(directory, "source.mp3"), file = path.join(directory, "narration.wav"); await writeFile(source, bytes);
     await runMedia("ffmpeg", ["-nostdin", "-y", "-i", source, "-vn", "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", file]);
     const probe = await probeMedia(file); if (!probe.audio || !probe.duration) throw new Error("OpenRouter returned unreadable speech");
-    await recordRouterUsage(settings.model, "voice", { id: response.headers.get("x-request-id"), usage: {} }, settings.userId);
+    await recordRouterUsage(settings.model, "voice", { id: response.headers.get("x-request-id"), usage: {} }, settings.userId, settings.reservationId);
     return { buffer: await readFile(file), contentType: "audio/wav", durationSeconds: probe.duration, providerData: { gateway: "openrouter", usage: {}, costStatus: "unavailable_in_binary_response" } };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

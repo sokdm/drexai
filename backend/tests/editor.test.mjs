@@ -136,9 +136,18 @@ test("exports reject unavailable infrastructure, unsupported resolution and unsa
 });
 test("dedicated worker renders, verifies R2 protocol storage, downloads and saves a complete MP4", { timeout: 180000 }, async () => {
   const queued = await request(`/edits/${edit._id}/exports`, json({ revision: edit.revision, settings: { format: "mp4", resolution: "480p", quality: "high", filename: "phase10-final" } })); assert.equal(queued.response.status, 202); const jobId = queued.data.export._id;
+  const {Wallet}=await import("../dist/models/Wallet.js");const {reserveCredits}=await import("../dist/services/wallet.js");
+  await Wallet.updateOne({userId:user._id},{$setOnInsert:{userId:user._id,availableCredits:100}},{upsert:true});
+  const reserve=await reserveCredits(String(user._id),{credits:10},"integrated-render-budget");
+  await VideoExport.updateOne({_id:jobId},{$set:{productionId:production._id,reservationId:reserve._id,budgetCredits:2}});
   worker = spawn(process.execPath, [fileURLToPath(new URL("../dist/workers/renderWorker.js", import.meta.url))], { cwd: fileURLToPath(new URL("../", import.meta.url)), windowsHide: true, env: { ...process.env, MONGODB_URI: db.getUri("drex_phase10_tests") }, stdio: ["ignore", "pipe", "pipe"] });
   worker.stdout.on("data", bytes => { workerLog += bytes; }); worker.stderr.on("data", bytes => { workerLog += bytes; });
   const completed = await waitFor(async () => { const job = await VideoExport.findById(jobId).lean(); if (job?.status === "failed") throw new Error(job.error); return job?.status === "completed" ? job : null; });
+  const {CreditReservation}=await import("../dist/models/CreditReservation.js");
+  await waitFor(async()=>((await CreditReservation.findById(reserve._id))?.status==="settled"));
+  const {LedgerEntry}=await import("../dist/models/LedgerEntry.js");
+  assert.equal(await LedgerEntry.countDocuments({idempotencyKey:`studio:${reserve._id}:final-render`}),1);
+  assert.equal((await Wallet.findOne({userId:user._id})).spentCredits,2);
   assert.equal(completed.progress, 100); assert.ok(completed.key); assert.equal(completed.width, 854); assert.equal(completed.height, 480); assert.ok(Math.abs(completed.duration - 6.5) < 0.1);
   assert.ok(storageRequests.includes(`HEAD ${completed.key}`)); assert.ok(storageRequests.filter(r => r === `GET ${completed.key}`).length >= 1);
   const download = await fetch(base + `/exports/${jobId}/download`, { headers }); assert.equal(download.status, 200); assert.match(download.headers.get("content-disposition"), /phase10-final.mp4/);

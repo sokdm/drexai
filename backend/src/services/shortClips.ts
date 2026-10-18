@@ -1,3 +1,4 @@
+import {StudioProduction} from "../models/StudioProduction.js";
 import { transcribeSource } from "./transcription.js";
 import { isOpenRouter } from "./openrouter.js";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -77,11 +78,13 @@ export async function prepareShortClips(job: any, progress: (value: number) => P
       const audio = await MediaAsset.create({ userId: job.userId, projectId: project._id, provider: "upload", storageProvider: "r2", type: "audio", ...storage, contentType: "video/mp4", durationSeconds: duration, metadata: { name: "Original speech", transcript: moment.captions.map(c => c.text).join(" ") } });
       const clipId = randomUUID(), style = { font: "Arial", size: 36, position: "bottom", preset: "bold", animation: "pop" };
       const timeline = timelineSchema.parse({ aspectRatio: "9:16", musicDecision: "none", clips: [{ id: clipId, kind: "video", assetId: String(video._id), label: moment.title, duration, fit: "cover", cropX: moment.speakerX, text: moment.hook, textStyle: { ...style, position: "top", size: 28 } }], audio: [{ id: randomUUID(), assetId: String(audio._id), label: "Original speech", role: "dialogue", start: 0, duration }], captions: moment.captions.map(c => ({ ...c, id: randomUUID(), style })) });
-      const edit = await VideoEdit.create({ userId: job.userId, projectId: project._id, productionId: randomUUIDToObjectId(), title: moment.title, timeline });
-      results.push({ ...moment, editId: String(edit._id), assetId: String(video._id) });
+      const production=await StudioProduction.create({userId:job.userId,projectId:project._id,title:moment.title,status:"draft",snapshot:{manual:true,source:"long-video-shorts",scenes:[]},settings:{},estimate:{credits:0,missingPricing:[]},timeline:[]});
+      const edit = await VideoEdit.create({ userId: job.userId, projectId: project._id, productionId: production._id, title: moment.title, timeline });
+      await MediaAsset.updateMany({_id:{$in:[video._id,audio._id]},userId:job.userId},{$set:{productionId:production._id}});
+      await AIProject.updateOne({_id:project._id,userId:job.userId},{$set:{latestProductionId:production._id,latestEditId:edit._id}});
+      results.push({ ...moment, productionId:String(production._id), editId: String(edit._id), assetId: String(video._id) });
       await progress(30 + Math.floor((i + 1) / selection.moments.length * 65));
     }
     return { projectId: String(project._id), clips: results, ...(transcript ? { transcript } : {}), note: "Engagement scores, speaker framing and subtitle timing are AI estimates. Review and export each saved timeline in the editor." };
   } finally { if (remote?.name) await dependencies.removeFile(remote.name); await rm(directory, { recursive: true, force: true }); }
 }
-function randomUUIDToObjectId() { return randomUUID().replace(/-/g, "").slice(0, 24); }

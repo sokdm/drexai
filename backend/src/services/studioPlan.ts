@@ -15,6 +15,7 @@ export const studioSettingsSchema = z.object({
   voiceId: z.string().default("Kore"),
   language: z.string().default("English"),
   style: z.string().max(200).default("cinematic"),
+  autoExport: z.boolean().default(false),
   narration: z.boolean().default(true),
   video: z.boolean().default(true),
   targetSeconds: z.number().int().min(4).max(3600).default(60),

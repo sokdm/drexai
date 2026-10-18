@@ -1,3 +1,4 @@
+import {CreditReservation} from "../models/CreditReservation.js";
 import { providerFor } from "./openrouter.js";
 import { ensureProductionEdit } from "./sharedEditing.js";
 import { inspectNativeVideo } from "./nativeAudio.js";
@@ -81,6 +82,8 @@ export async function runStudioProduction(id: string, providers: StudioProviders
       }
       if (await finishControl()) return;
       await checkGenerationUser(String(production.userId));
+      const reserve=await CreditReservation.findOne({_id:production.reservationId,userId:production.userId,status:"reserved"});
+      if(!reserve || (reserve.remainingCredits??reserve.credits)<step.credits)throw new Error("Approved production budget is closed or exhausted. No provider request was submitted.");
       if (!step.reused) await assertProviderBudget(step.input.model, step.pricing?.providerCostUsd);
       if (step.input.model.startsWith("openrouter/") && !step.providerJobId) await (await import("./openrouterManagement.js")).checkProviderAffordability(Number(step.pricing?.providerCostUsd));
       const assets = await MediaAsset.find({ _id: { $in: steps.map(s => s.assetId).filter(Boolean) }, userId: production.userId, deletedAt: null }).lean();
@@ -107,7 +110,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           }
         }
         if (!output) {
-          const input: any = { ...step.input, userId: String(production.userId) };
+          const input: any = { ...step.input, userId: String(production.userId),reservationId:String(production.reservationId) };
           if (step.kind === "image") {
             input.referenceImages = [];
             for (const ref of input.characterReferenceIds ?? []) {
@@ -133,7 +136,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           } else {
             if (!step.providerJobId) { step.providerJobId = await providers.createVideo(input); await checkpoint(); }
             const operation = await providers.pollVideo(step.providerJobId);
-            const videos = await providers.downloadVideo(operation, { userId: String(production.userId), model: step.input.model });
+            const videos = await providers.downloadVideo(operation, { userId: String(production.userId), model: step.input.model,reservationId:String(production.reservationId) });
             const native = videos[0].metadata;
             if (step.input.nativeAudio && (!native?.nativeAudio || Math.abs(Number(native.durationSeconds) - step.input.durationSeconds) > 0.5)) throw Object.assign(new Error("Generated native audiovisual clip is incomplete or has an unexpected duration. Review and regenerate with a new quote."), { mediaRejected: true });
             output = { ...videos[0], durationSeconds: native?.durationSeconds ?? step.input.durationSeconds, providerUsage: { ...((operation.response as any)?.usageMetadata ?? {}), ...native } };
@@ -174,7 +177,18 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     await studioLog(production, "processing", "Free editing: saving the shared editor timeline, synchronized audio and available transcript captions.");
     const edit = await ensureProductionEdit({ ...production.toObject(), timeline });
     await studioLog(production, "success", `Shared editor ready at revision ${edit.revision}. Manual and Studio edits use this same saved timeline.`);
-    await closeStudioReserve(String(production.reservationId), "production_complete");
+    if(production.settings.autoExport){
+      const {VideoExport}=await import("../models/VideoEdit.js");
+      const {timelineSchema,exportSettingsSchema}=await import("@drex/shared");
+      const {validateTimelineAssets}=await import("./videoEditing.js");
+      const saved=timelineSchema.parse(edit.timeline);
+      const duration=saved.clips.reduce((n,c)=>n+c.duration,0);
+      if(production.estimate.renderCredits>0 && duration>Number(production.estimate.renderMaxSeconds)+.05)throw new Error("Timeline duration exceeds the approved rendering budget. Existing outputs are preserved; approve a new rendering quote in the editor.");
+      const settings=exportSettingsSchema.parse({format:"mp4",resolution:"720p",quality:"standard",filename:"production"});
+      await validateTimelineAssets(saved,String(production.userId),settings);
+      const exportJob=await VideoExport.findOneAndUpdate({productionId:production._id,revision:edit.revision},{$setOnInsert:{userId:production.userId,projectId:production.projectId,editId:edit._id,revision:edit.revision,timeline:saved,settings,reservationId:production.reservationId,budgetCredits:production.estimate.renderCredits||0}},{upsert:true,new:true});
+      await studioLog(production,exportJob?.status==="failed"?"failure":exportJob?.status==="completed"?"success":"waiting",`FFmpeg MP4 export ${exportJob?.status || "queued"}; uses the original approved budget and saved editor revision.`,"final-render");
+    }else await closeStudioReserve(String(production.reservationId), "production_complete");
     await checkpoint({ status: "completed", completedAt: new Date(), error: "" });
     await studioLog(production, "success", "Your video production is ready for review.");
   } catch (error: any) {

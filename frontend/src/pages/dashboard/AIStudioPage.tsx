@@ -1,3 +1,4 @@
+import {timelineSchema} from "@drex/shared";
 import { StudioBrief } from "./StudioBrief";
 import { StudioStoryboard } from "./StudioStoryboard";
 import { appendLibraryAsset } from "../../lib/appendLibraryAsset";
@@ -14,12 +15,14 @@ import { EditorPlayer } from "./EditorPlayer";
 import { StudioPreview } from "./StudioPreview";
 
 const fieldClass = "focus-ring mt-1 h-10 w-full rounded-md border border-line bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900";
-const defaults = { imageModel: "gemini-nano-banana-2.1", videoModel: "veo-3.1-generate-preview", voiceModel: "gemini-3.8-flash-tts", aspectRatio: "16:9", resolution: "1K", quality: "720p", voiceId: "Kore", language: "English", style: "cinematic", narration: true, video: true, targetSeconds: 60, maxClipsPerScene: 3, characterVoices: {} as Record<string, string> };
+const defaults = { autoExport:true, imageModel: "gemini-nano-banana-2.1", videoModel: "veo-3.1-generate-preview", voiceModel: "gemini-3.8-flash-tts", aspectRatio: "16:9", resolution: "1K", quality: "720p", voiceId: "Kore", language: "English", style: "cinematic", narration: true, video: true, targetSeconds: 60, maxClipsPerScene: 3, characterVoices: {} as Record<string, string> };
 const eventColors: Record<string, string> = { waiting: "text-amber-400", processing: "text-sky-400", success: "text-emerald-400", failure: "text-red-400", cancelled: "text-zinc-400" };
 
 export function AIStudioPage() {
+  const [briefActivity,setBriefActivity]=useState<any[]>([]);
+  const [budget,setBudget]=useState<any>(null);
+  const [exports,setExports]=useState<any[]>([]);
   const [sharedEdit, setSharedEdit] = useState<any>(null), [editTime, setEditTime] = useState(0), [editPlaying, setEditPlaying] = useState(false);
-  const [studioMessage, setStudioMessage] = useState(""), [studioReplies, setStudioReplies] = useState<string[]>([]);
   const [studioMode, setStudioMode] = useState(new URLSearchParams(window.location.search).get("mode") === "commercial" ? "commercial" : "production");
   const [params, setParams] = useSearchParams();
   const [config, setConfig] = useState<any>(null);
@@ -46,8 +49,8 @@ export function AIStudioPage() {
   const refresh = useCallback(async () => {
     if (!productionId) return;
     const data = await api<any>(`/api/studio/productions/${productionId}`);
-    setProduction(data.production); setAssets(data.assets); setEvents(data.events);
-    if (data.production.timeline?.length || data.production.snapshot?.manual) { const saved = await api<any>(`/api/studio/productions/${productionId}/edit`); setSharedEdit(saved.edit); if (saved.assets) setAssets(old => [...old, ...saved.assets.filter((a: any) => !old.some(o => o._id === a._id))]); }
+    setProduction(data.production); setAssets(data.assets); setEvents(data.events);setExports(data.exports||[]);setBudget(data.budget);
+    if (data.production.timeline?.length || data.production.snapshot?.manual) { const saved = await api<any>(`/api/studio/productions/${productionId}/edit`); setSharedEdit({...saved.edit,timeline:timelineSchema.parse(saved.edit.timeline)}); if (saved.assets) setAssets(old => [...old, ...saved.assets.filter((a: any) => !old.some(o => o._id === a._id))]); }
   }, [productionId]);
 
   useEffect(() => {
@@ -62,7 +65,7 @@ export function AIStudioPage() {
     return () => { alive = false; };
   }, [projectId, production?.status, productionId]);
   useEffect(() => {
-    setProduction(null); setAssets([]); setEvents([]); setUrls({}); setPreview(false);
+    setProduction(null); setSharedEdit(null);setBudget(null);setExports([]); setAssets([]); setEvents([]); setUrls({}); setPreview(false);
     if (!productionId) return;
     let alive = true;
     const serial = ++activeRequest.current;
@@ -72,11 +75,11 @@ export function AIStudioPage() {
         const data = await api<any>(`/api/studio/productions/${productionId}`);
         if (!alive || serial !== activeRequest.current) return;
         setProduction(data.production); setAssets(data.assets); setEvents(data.events);
-        if (data.production.timeline?.length) { const saved = await api<any>(`/api/studio/productions/${productionId}/edit`); if (!alive) return; setSharedEdit(saved.edit); if (saved.assets) setAssets(old => [...old, ...saved.assets.filter((a: any) => !old.some(o => o._id === a._id))]); }
+        if (data.production.timeline?.length || data.production.snapshot?.manual) { const saved = await api<any>(`/api/studio/productions/${productionId}/edit`); if (!alive) return; setSharedEdit({...saved.edit,timeline:timelineSchema.parse(saved.edit.timeline)}); if (saved.assets) setAssets(old => [...old, ...saved.assets.filter((a: any) => !old.some(o => o._id === a._id))]); }
         setProjectId(String(data.production.projectId));
         if (initial) {
           setMaxCredits(data.production.maxCredits || data.production.estimate.credits || 0);
-          setSettings({ ...defaults, ...data.production.settings });
+          setSettings({ ...defaults, ...data.production.settings,autoExport:Boolean(data.production.settings?.autoExport) });
           initial = false;
         }
       } catch (err) { if (alive) setError(err instanceof Error ? err.message : "Could not load production"); }
@@ -110,7 +113,7 @@ export function AIStudioPage() {
   const sceneAssets = assets.filter(asset => sceneSteps.some((step: any) => step.assetId === asset._id));
   const previewAsset = sceneAssets.find(asset => asset._id === previewAssetId) ?? sceneAssets.find(asset => asset.type === "video") ?? sceneAssets.find(asset => asset.type === "image");
   const finished = steps.filter((s: any) => ["completed", "skipped"].includes(s.status)).length;
-  const spent = steps.filter((s: any) => s.charged).reduce((sum: number, s: any) => sum + s.credits, 0);
+  const spent = budget?.settled ?? steps.filter((s: any) => s.charged).reduce((sum: number, s: any) => sum + s.credits, 0);
   const ready = config?.readiness && Object.values(config.readiness).every(Boolean);
   const running = ["queued", "running"].includes(production?.status);
   const current = steps.find((s: any) => s.status === "requesting");
@@ -143,17 +146,6 @@ export function AIStudioPage() {
   async function control(action: string) {
     await api(`/api/studio/productions/${productionId}/control`, { method: "POST", body: JSON.stringify({ action }) }); await refresh();
   }
-  async function studioCommand() {
-    const message = studioMessage.trim().toLowerCase(); if (!message || busy) return;
-    await act(async () => { let reply = "";
-      if (/status|progress|what/.test(message)) reply = production ? production.status + ": " + finished + " of " + steps.length + " steps complete; " + spent + " credits settled." : "Choose and approve a script project, then prepare an estimate.";
-      else if (/estimate|plan/.test(message)) { if (!projectId) throw new Error("Choose a project first"); await plan(); reply = "Prepared the real production estimate. Review and approve its spending limit to begin."; }
-      else if (/pause|resume|retry/.test(message)) { if (!productionId) throw new Error("Open a production first"); const operation = /pause/.test(message) ? "pause" : /resume/.test(message) ? "resume" : "retry"; if (!window.confirm("Apply " + operation + " to this production within its approved budget?")) return; await control(operation); reply = "Production control accepted. Check live activity for the worker's next action."; }
-      else if (sharedEdit && productionId) { const result = await api<any>(`/api/studio/productions/${productionId}/edit-command`, { method: "POST", body: JSON.stringify({ message: studioMessage, revision: sharedEdit.revision }) }); setSharedEdit(result.edit); setEditTime(0); setEditPlaying(false); await refresh(); reply = result.explanation; }
-      else reply = "This production coordinator supports status, prepare estimate, pause, resume and retry. Creative research is available in the full AI Assistant. New media generation requires the normal estimate approval.";
-      setStudioReplies(old => [...old, "You: " + studioMessage, reply]); setStudioMessage("");
-    });
-  }
   function chooseProject(value: string) { setProjectId(value); setParams({ projectId: value }); setSceneId(""); setMaxCredits(0); }
   function downloadTimeline() {
     const blob = new Blob([JSON.stringify({ title: production.title, settings: production.settings, timeline: production.timeline }, null, 2)], { type: "application/json" });
@@ -161,7 +153,7 @@ export function AIStudioPage() {
     anchor.href = url; anchor.download = "drex-production-timeline.json"; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <div className="studio-workspace space-y-4"><nav className="creator-mode-tabs" aria-label="Studio tools"><button aria-pressed={studioMode === "production"} onClick={() => setStudioMode("production")}><Clapperboard size={13}/>Video production</button>{(production?.timeline?.length > 0 || sharedEdit) && <Link to={`/dashboard/video-editor?productionId=${productionId}`}>Timeline and export</Link>}<button aria-pressed={studioMode === "commercial"} onClick={() => setStudioMode("commercial")}><ShoppingBag size={13}/>Product Commercials</button><button aria-pressed={studioMode === "agent"} onClick={() => setStudioMode("agent")}><MessageSquare size={13}/>AI Director chat</button><Link to="/dashboard/video-editor?mode=shorts"><Scissors size={13}/>Long video to short clips</Link></nav>{studioMode === "commercial" && <ProductCommercial onReady={p => { setConfig((old: any) => old ? { ...old, projects: [p, ...old.projects.filter((item: any) => item._id !== p._id)] } : old); setProjectId(p._id); }} />}{studioMode === "agent" && <AIAssistantPage productionId={productionId || undefined} />}<div hidden={studioMode !== "production"}>
+  return <div className={`studio-workspace space-y-4 ${studioMode === "agent" ? "studio-agent-focus" : ""}`}><nav className="creator-mode-tabs" aria-label="Studio tools"><button aria-pressed={studioMode === "production"} onClick={() => setStudioMode("production")}><Clapperboard size={13}/>Video production</button>{(production?.timeline?.length > 0 || sharedEdit) && <Link to={`/dashboard/video-editor?productionId=${productionId}`}>Timeline and export</Link>}<button aria-pressed={studioMode === "commercial"} onClick={() => setStudioMode("commercial")}><ShoppingBag size={13}/>Product Commercials</button><button aria-pressed={studioMode === "agent"} onClick={() => {setStudioMode("agent");setRightOpen(true);}}><MessageSquare size={13}/>AI Director chat</button><Link to="/dashboard/video-editor?mode=shorts"><Scissors size={13}/>Long video to short clips</Link></nav>{studioMode === "commercial" && <ProductCommercial onReady={p => { setConfig((old: any) => old ? { ...old, projects: [p, ...old.projects.filter((item: any) => item._id !== p._id)] } : old); setProjectId(p._id);setParams({projectId:p._id});setStudioMode("production"); }} />}<div hidden={studioMode === "commercial"}>
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4 dark:border-slate-800">
       <div><h1 className="text-2xl font-bold">AI Studio</h1><p className="mt-1 text-sm text-slate-500">{production?.title ?? project?.title ?? "Choose a script project"}</p></div>
       <div className="flex items-center gap-2"><span className="text-xs text-slate-500">{production?.status?.replaceAll("_", " ") ?? "Ready to plan"}</span><button aria-label="Toggle project panel" title="Project panel" className="focus-ring grid h-10 w-10 place-items-center rounded-md border border-line dark:border-slate-700" onClick={() => setLeftOpen(!leftOpen)}><PanelLeftClose size={18} /></button><button aria-label="Toggle activity panel" title="Activity panel" className="focus-ring grid h-10 w-10 place-items-center rounded-md border border-line dark:border-slate-700" onClick={() => setRightOpen(!rightOpen)}><PanelRightClose size={18} /></button></div>
@@ -171,7 +163,7 @@ export function AIStudioPage() {
       !config.readiness.queueEnabled && "Redis queue", !config.readiness.storageConfigured && "R2 storage", !config.readiness.providerConfigured && "AI provider key", !config.readiness.workerOnline && "Studio worker"
     ].filter(Boolean).join(", ")}.</div>}
     <div className={`studio-columns ${leftOpen ? "studio-with-left" : ""} ${rightOpen ? "studio-with-right" : ""}`}>
-      {leftOpen && <aside className="studio-project space-y-5 border-b border-line pb-4 dark:border-slate-800"><h2 className="reference-panel-title"><Clapperboard size={15}/>Project setup</h2><details open={!projectId}><summary>Create a new video</summary><StudioBrief onProject={value => { setConfig((old:any)=>old?{...old,projects:[value,...old.projects.filter((p:any)=>p._id!==value._id)]}:old);chooseProject(value._id); }}/></details>
+      {leftOpen && <aside className="studio-project space-y-5 border-b border-line pb-4 dark:border-slate-800"><h2 className="reference-panel-title"><Clapperboard size={15}/>Project setup</h2><details open={!projectId}><summary>Create a new video</summary><StudioBrief onActivity={setBriefActivity} onProject={value => { setConfig((old:any)=>old?{...old,projects:[value,...old.projects.filter((p:any)=>p._id!==value._id)]}:old);chooseProject(value._id); }}/></details>
         <label className="block text-xs font-semibold">Project<select className={fieldClass} value={projectId} onChange={e => chooseProject(e.target.value)}><option value="">Select a project</option>{config?.projects.map((p: any) => <option key={p._id} value={p._id}>{p.title}{!p.approvedAt ? " (draft)" : ""}</option>)}</select></label>
         {production?.snapshot.niche && <p className="text-sm font-semibold text-teal-700 dark:text-teal-300">{production.snapshot.niche.name}</p>}
         <p className="text-sm leading-6 text-slate-500">{production?.snapshot.summary ?? project?.summary}</p>
@@ -191,19 +183,20 @@ export function AIStudioPage() {
           <label className="text-xs font-semibold">Target seconds<input type="number" min={4} max={3600} className={fieldClass} value={settings.targetSeconds} onChange={e => setSettings({ ...settings, targetSeconds: Number(e.target.value) })} /></label>
           <label className="text-xs font-semibold">Maximum clips per scene<input type="number" min={1} max={12} className={fieldClass} value={settings.maxClipsPerScene} onChange={e => setSettings({ ...settings, maxClipsPerScene: Number(e.target.value) })} /></label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.narration} onChange={e => setSettings({ ...settings, narration: e.target.checked })} />Generate off-screen narration</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.autoExport} onChange={e=>setSettings({...settings,autoExport:e.target.checked})}/>Render MP4 within the production budget</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={settings.video} onChange={e => setSettings({ ...settings, video: e.target.checked })} />Generate video clips</label>
-          <p className="text-xs text-slate-500">Character dialogue and environmental sound are generated by Veo with the video. Narrator voice settings apply only to separate TTS narration. Accent and delivery directions come from each script scene.</p>
+          <p className="text-xs text-slate-500">Supported native dialogue and environmental sound are generated with the video. Narrator voice settings apply only to separate TTS narration. Accent and delivery directions come from each script scene.</p>
         </div></details><details><summary>Assets and licensed packs</summary><AssetPacks edit={sharedEdit} disabled={busy} onUse={async asset => { if (!sharedEdit) throw new Error("Complete a rough cut first"); const timeline = appendLibraryAsset(sharedEdit.timeline,asset);const result = await api<any>(`/api/editor/edits/${sharedEdit._id}`, { method:"PUT",body:JSON.stringify({ title:sharedEdit.title,revision:sharedEdit.revision,timeline }) });setSharedEdit(result.edit);await refresh(); }} onAsset={a => setAssets(old => [a,...old])} onEdit={value => { setSharedEdit(value);void refresh(); }} /></details><section className="studio-asset-library"><h3>Production assets</h3>{assets.filter(a => a.type !== "audio").map(asset => <button key={asset._id} onClick={() => { const step = steps.find((s: any) => s.assetId === asset._id); if (step?.sceneId) setSceneId(step.sceneId); setPreviewAssetId(asset._id); setPreview(false); }}>{urls[asset._id] && (asset.type === "video" ? <video src={urls[asset._id]} muted preload="metadata" /> : <img src={urls[asset._id]} alt="Scene asset" />)}<span>{asset.type}</span></button>)}</section>
       </aside>}
       <main className="studio-center min-w-0 space-y-5"><div className="reference-project-heading"><div><h2>{production?.title || project?.title || "Your video production"}</h2><p>{production?.snapshot.summary || project?.summary || "Plan, create and edit your next production."}</p></div><span>{project?.type || "Video production"}</span></div>
-        {production?.status === "completed" && <div role="status" className="border-l-2 border-emerald-500 bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Your video production is ready. Review native dialogue, voice consistency and mouth synchronization before exporting.</div>}
+        {production?.status === "completed" && <div role="status" className="border-l-2 border-emerald-500 bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Your production timeline is ready. MP4 rendering progress appears in the conversation. Review native dialogue and voice synchronization.</div>}
         {production?.status === "draft" && !production?.snapshot?.manual && <section aria-label="Production quote" className="border-y border-line py-4 dark:border-slate-800">
           <h2 className="text-lg font-bold">Production estimate</h2>
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">{[["Images", production.estimate.images], ["Speech segments", production.estimate.audioSegments], ["Max clips", production.estimate.maxClips], ["Max video seconds", production.estimate.maxVideoSeconds]].map(([label, value]) => <div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 text-lg font-semibold">{value}</dd></div>)}</dl>
           <p className="mt-3 text-sm text-slate-500">{production.estimate.coverage}</p>
           {production.estimate.missingPricing.length > 0 ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Pricing unavailable: {production.estimate.missingPricing.join(", ")}</p> : <p className="mt-4 text-lg font-bold">{production.estimate.credits} credits maximum estimated</p>}
           <label className="mt-3 block max-w-xs text-sm font-semibold">Approved spending limit<input className={fieldClass} type="number" min={production.estimate.credits ?? 0} max={1000000} value={maxCredits} onChange={e => setMaxCredits(Number(e.target.value))} /></label>
-          <p className="mt-2 text-xs text-slate-500">Quote expires {new Date(production.expiresAt).toLocaleTimeString()}. Rough-cut preview adds no rendering charge.</p>
+          <p className="mt-2 text-xs text-slate-500">Quote expires {new Date(production.expiresAt).toLocaleTimeString()}. {production.settings.autoExport ? `MP4 rendering included: ${production.estimate.renderCredits || 0} credits.` : "Rough-cut preview adds no rendering charge."}</p>
           <div className="mt-4 flex flex-wrap gap-2"><Button disabled={busy || !ready || production.estimate.credits == null || maxCredits < production.estimate.credits} onClick={() => act(async () => { await api(`/api/studio/productions/${productionId}/approve`, { method: "POST", body: JSON.stringify({ maxCredits }) }); await refresh(); })}><Play size={17} />Approve & start</Button><Button variant="secondary" disabled={busy} onClick={() => act(() => control("cancel"))}>Cancel plan</Button></div>
         </section>}
         {sharedEdit && (preview || production?.snapshot?.manual) ? <div><EditorPlayer timeline={sharedEdit.timeline} urls={urls} time={editTime} playing={editPlaying} onTime={setEditTime} onPlaying={setEditPlaying} onError={setError} /><button aria-label={editPlaying ? "Pause preview" : "Play rough cut"} onClick={() => setEditPlaying(v => !v)}>{editPlaying ? "Pause" : "Play shared edit"}</button><input type="range" aria-label="Preview position" min={0} max={sharedEdit.timeline.clips.reduce((n: number, c: any) => n + c.duration, 0)} step={0.05} value={editTime} onChange={e => { setEditTime(Number(e.target.value)); setEditPlaying(false); }} /><Link to={`/dashboard/video-editor?editId=${sharedEdit._id}`}>Open this timeline in Video Editor</Link><p>Revision {sharedEdit.revision}. Saved manual edits are preserved.</p></div> : <section>
@@ -216,7 +209,7 @@ export function AIStudioPage() {
         {production && <div className="border-t border-line pt-4 dark:border-slate-800"><div className="flex justify-between gap-2 text-xs text-slate-500"><span>{finished} / {steps.length} steps</span><span>{spent} / {production.maxCredits || production.estimate.credits || 0} credits settled</span></div><progress aria-label="Production progress" value={finished} max={steps.length || 1} className="mt-2 h-2 w-full accent-emerald-500" /></div>}
         <StudioStoryboard scenes={sortedScenes} steps={steps} assets={assets} urls={urls} selectedId={scene?._id} onScene={(id: string) => { setSceneId(id);setPreview(false); }} edit={sharedEdit} time={editTime} onSeek={(value: number)=>{setPreview(true);setEditTime(value);setEditPlaying(false);}} />
       </main>
-      {rightOpen && <aside className="studio-activity min-w-0 border-t border-line pt-4 dark:border-slate-800"><section className="studio-director-panel"><h2>AI Production Assistant</h2><AIAssistantPage key={productionId || "new"} productionId={productionId || undefined} /></section><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-bold"><Terminal size={17} />Live activity</h2><span className="text-xs text-slate-500">{connected ? "Connected" : productionId ? "Reconnecting" : "Idle"}</span></div><p className="my-3 text-xs text-slate-500">{current?.label ?? production?.status ?? "No active operation"}</p><div ref={activityFeed} role="log" aria-label="Production activity" className="max-h-[65vh] min-h-40 space-y-3 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs leading-5">{events.map(event => <div key={event._id}><time className="text-zinc-500">{new Date(event.createdAt).toLocaleTimeString()}</time><p className={eventColors[event.level] ?? "text-zinc-300"}>{event.message}</p></div>)}{!events.length && <p className="text-zinc-500">No activity yet.</p>}</div>{production?.error && <p className="mt-3 text-sm text-red-500">{production.error}</p>}<section className="studio-coordinator"><h3>Production coordinator</h3><p className="text-xs text-slate-500">Control production or edit the shared timeline: add transitions, cinematic color, captions or an intro. Paid media still requires quote approval.</p>{studioReplies.map((text, i) => <p key={i}>{text}</p>)}<textarea aria-label="Production command" rows={2} value={studioMessage} onChange={e => setStudioMessage(e.target.value)} placeholder="Show progress or prepare an estimate" /><button disabled={busy || !studioMessage.trim()} onClick={() => void studioCommand()}>Run production command</button><Link to="/dashboard/ai-assistant">Open research agent</Link></section></aside>}
+      {rightOpen && <aside className="studio-activity min-w-0"><section className="studio-director-panel"><h2>AI Production Assistant</h2><AIAssistantPage productionId={productionId || undefined} projectId={projectId || undefined} productionSettings={settings} activity={events} onProductionPlan={p=>{setMaxCredits(p.estimate.credits??0);setParams({projectId:String(p.projectId),productionId:p._id});}} budgetApproval={<>{exports.map(job=><div key={job._id} className="agent-tool-activity"><p>MP4 export ? {job.status} ? {job.progress}%</p>{job.error&&<p>{job.error}</p>}{job.status==="completed"&&<button onClick={()=>void act(async()=>{await downloadMedia(`/api/editor/exports/${job._id}/download`,"production.mp4");})}>Download MP4</button>}</div>)}{production?.status==="draft"?<div className="agent-budget-approval"><strong>Production budget: {production.estimate.credits??"Unpriced"} credits</strong><p>Approve once. Outputs settle progressively; unused credits are released.</p><Button disabled={busy || !ready || production.estimate.credits==null} onClick={()=>void act(async()=>{await api(`/api/studio/productions/${productionId}/approve`,{method:"POST",body:JSON.stringify({maxCredits:production.estimate.credits})});await refresh();})}>Approve budget and produce</Button></div>:production?.approvedAt?<p className="agent-budget-summary">Budget {production.maxCredits} ? Settled {spent} credits ? {production.status}</p>:null}</>}/></section></aside>}
     </div>
     {(production || sortedScenes.length > 0) && <footer className="studio-footer bottom-0 z-20 border-t border-line bg-white p-3 dark:border-slate-800 dark:bg-slate-900 lg:sticky">
       <div className="flex gap-2 overflow-x-auto pb-3">{sortedScenes.map((s: any) => <button key={s._id} onClick={() => { setSceneId(s._id); setPreview(false); }} className={`focus-ring w-36 shrink-0 rounded-md border px-3 py-2 text-left text-xs ${scene?._id === s._id ? "border-brand bg-brand/10" : "border-line dark:border-slate-700"}`}><span className="block font-semibold">Scene {s.order}</span><span className="mt-1 block truncate">{s.title}</span><span className="mt-1 block text-slate-500">{steps.filter((step: any) => step.sceneId === String(s._id) && step.status === "completed").length} outputs ready</span></button>)}</div>

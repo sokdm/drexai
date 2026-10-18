@@ -274,3 +274,29 @@ test("incomplete native audio requires review and never automatically charges or
  const calls = f.calls.video.length; await runStudioProduction(String(production._id), f.providers); assert.equal(f.calls.video.length, calls);
  assert.ok(!f.calls.speech.length); assert.equal((await Wallet.findOne({ userId: f.userId })).spentCredits, 4);
 });
+
+test("automatic production export reuses the single budget and queues the saved editor revision once",async()=>{
+ const {VideoExport}=await import("../dist/models/VideoEdit.js");const f=await fixture({video:false,narration:false,autoExport:true});
+ f.production.estimate={...f.production.estimate,renderCredits:3,renderMaxSeconds:60};await f.production.save();
+ await runStudioProduction(String(f.production._id),f.providers);
+ const production=await StudioProduction.findById(f.production._id);assert.equal(production.status,"completed",production.error);
+ const edit=await VideoEdit.findOne({productionId:f.production._id});const job=await VideoExport.findOne({productionId:f.production._id});
+ assert.ok(job);assert.equal(String(job.editId),String(edit._id));assert.equal(job.revision,edit.revision);assert.equal(String(job.reservationId),String(f.reservation._id));assert.equal(job.budgetCredits,3);
+ const reserve=await CreditReservation.findById(f.reservation._id);assert.equal(reserve.status,"reserved");assert.equal(reserve.remainingCredits,96);
+ await runStudioProduction(String(f.production._id),f.providers);assert.equal(await VideoExport.countDocuments({productionId:f.production._id}),1);
+});
+test("shared production tools protect ownership and do not start paid work when preparing plans",async()=>{
+ const {executeProductionTool}=await import("../dist/services/agentTools.js");const f=await fixture({video:false,narration:false});
+ await assert.rejects(executeProductionTool({name:"inspect_production",query:"status"},{userId:String(new mongoose.Types.ObjectId()),productionId:String(f.production._id),allowTimelineEdits:false}),/owned/);
+ await assert.rejects(executeProductionTool({name:"control_production",query:"cancel"},{userId:String(f.userId),productionId:String(f.production._id),allowTimelineEdits:false}),/permission/);
+ const before=await CreditReservation.countDocuments();const result=await executeProductionTool({name:"prepare_production",query:"plan"},{userId:String(f.userId),projectId:String(f.project._id),settings:f.production.settings,allowTimelineEdits:false});
+ assert.equal(result.requiresBudgetApproval,true);assert.equal(result.productionPlan.status,"draft");assert.equal(await CreditReservation.countDocuments(),before);
+});
+
+test("manual and Shorts productions reuse the saved editor in agent commands",async()=>{
+ const {executeProductionTool}=await import("../dist/services/agentTools.js");const f=await fixture({video:false,narration:false});
+ f.production.snapshot={manual:true,scenes:[]};f.production.timeline=[];await f.production.save();
+ const edit=await VideoEdit.create({userId:f.userId,productionId:f.production._id,projectId:f.project._id,title:"Manual edit",timeline:{clips:[{id:"title",kind:"title",label:"Saved title",text:"Keep me",sourceIn:0,duration:3}],audio:[],captions:[],aspectRatio:"16:9",musicDecision:"none"}});
+ const result=await executeProductionTool({name:"edit_timeline",query:"Make cinematic"},{userId:String(f.userId),productionId:String(f.production._id),allowTimelineEdits:true});
+ assert.equal(String(result.editId),String(edit._id));assert.equal(result.revision,1);assert.equal(await VideoEdit.countDocuments({productionId:f.production._id}),1);
+});

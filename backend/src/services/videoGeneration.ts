@@ -78,8 +78,8 @@ export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 6
   throw new Error("Veo generation timed out; existing operation can be resumed without submitting another generation");
 }
 
-export async function downloadVeoVideos(operation: any, context?: { userId?: string; model?: string }) {
-  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId, context?.model);
+export async function downloadVeoVideos(operation: any, context?: { userId?: string; model?: string; reservationId?:string }) {
+  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId, context?.model, context?.reservationId);
   const samples = operation.response?.generateVideoResponse?.generatedSamples ?? operation.response?.generatedVideos ?? [];
   const outputs: { buffer: Buffer; contentType: string; metadata: any }[] = [];
   for (const sample of samples) {

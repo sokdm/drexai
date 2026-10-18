@@ -81,7 +81,9 @@ test("real FFmpeg preparation creates five persisted editable clips with origina
     open: async () => ({ ContentLength: sourceSize, Body: createReadStream(source) }), file: async () => ({ name: "files/test", uri: "mock://test" }), removeFile: async () => {}, analyze: async () => moments,
     upload: async (file, key) => { const info = await probeMedia(file); assert.ok(info.audio && info.video); assert.ok(Math.abs(info.duration - 5) < .15); outputs.push(info); return { key, bucket: "test", sizeBytes: (await stat(file)).size }; }
   });
-  assert.equal(outputs.length, 5); assert.equal(result.clips.length, 5); assert.equal(progress.at(-1), 95);
+  assert.equal(outputs.length, 5); assert.equal(result.clips.length, 5);
+  const {StudioProduction}=await import("../dist/models/StudioProduction.js");
+  for(const clip of result.clips){const production=await StudioProduction.findOne({_id:clip.productionId,userId:user._id});assert.equal(production.snapshot.manual,true);assert.equal(String((await VideoEdit.findById(clip.editId)).productionId),clip.productionId);} assert.equal(progress.at(-1), 95);
   const edits = await VideoEdit.find({ userId: user._id }); assert.equal(edits.length, 5);
   for (const edit of edits) { assert.equal(edit.timeline.aspectRatio, "9:16"); assert.equal(edit.timeline.audio.length, 1); assert.equal(edit.timeline.clips[0].cropX, .7); assert.equal(edit.timeline.captions[0].style.animation, "pop"); assert.match(subtitleDocument(edit.timeline, 720, 1280), /\\t\(0,150/); }
 });

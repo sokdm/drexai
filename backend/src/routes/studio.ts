@@ -1,4 +1,6 @@
-import { VideoEdit } from "../models/VideoEdit.js";
+import {CreditReservation} from "../models/CreditReservation.js";
+import { prepareProduction, controlProduction } from "../services/productionTools.js";
+import { VideoEdit, VideoExport } from "../models/VideoEdit.js";
 import { assetPackRouter } from "./assetPacks.js";
 import { configuredModels } from "../services/platformControl.js";
 import { ensureProductionEdit, applyProductionEdit } from "../services/sharedEditing.js";
@@ -51,43 +53,7 @@ studioRouter.get("/productions", wrap(async (req, res) => {
 }));
 
 studioRouter.post("/plans", wrap(async (req, res) => {
-  const input = z.object({ projectId: idSchema, settings: studioSettingsSchema, sourceProductionId: idSchema.optional(), regenerateStepKey: z.string().max(150).optional() }).parse(req.body);
-  const project = await AIProject.findOne({ _id: input.projectId, userId: req.user._id }).lean();
-  if (!project || !project.approvedAt) fail("Approve the script before creating a production plan");
-  const characters = await CharacterProfile.find({ projectId: project!._id, userId: req.user._id }).lean();
-  const refs = [];
-  for (const character of characters) {
-    const reference = character.referenceImageUrl ? await MediaAsset.findOne({ userId: req.user._id, type: "image", deletedAt: null, url: character.referenceImageUrl }).select("_id") : null;
-    refs.push({ ...character, referenceAssetId: reference ? String(reference._id) : undefined });
-  }
-  const niche = project!.nicheId ? await Niche.findOne({ _id: project!.nicheId, userId: req.user._id }).lean() : null;
-  let snapshot: any = JSON.parse(JSON.stringify({ title: project!.title, summary: project!.summary, scenes: project!.scenes, characters: refs, niche, product: (project!.prompts as any)?.sourceSettings?.product }));
-  let settings = input.settings;
-  let source: any;
-  if (input.sourceProductionId) {
-    source = await StudioProduction.findOne({ _id: input.sourceProductionId, userId: req.user._id, projectId: input.projectId });
-    if (!source || !["completed", "cancelled", "failed", "needs_review", "paused"].includes(source.status) || source.leaseUntil > new Date()) fail("Pause production before regenerating an output");
-    snapshot = source.snapshot; settings = studioSettingsSchema.parse(source.settings);
-  }
-  if (snapshot.product) {
-    if (!(await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled) fail("Product commercials are disabled by the administrator");
-    const ids = snapshot.product.assetIds || [];
-    if (await MediaAsset.countDocuments({ _id: { $in: ids }, userId: req.user._id, type: "image", deletedAt: null }) !== new Set(ids).size) fail("Product reference images are unavailable");
-  }
-  const steps = buildStudioSteps(snapshot, settings);
-  if (source) {
-    const selected = source.steps.find((s: StudioStep) => s.key === input.regenerateStepKey);
-    if (!selected) fail("Select an output to regenerate");
-    for (const step of steps) {
-      const old = source.steps.find((s: StudioStep) => s.key === step.key);
-      const dependsOnSelection = step.key === selected.key || (step.sceneId === selected.sceneId && step.kind === "video" && selected.kind !== "video");
-      if (old?.status === "completed" && old.assetId && !dependsOnSelection && (step.kind !== "video" || old.input.nativeAudio === true) && (step.kind !== "audio" || old.input.track === step.input.track)) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
-    }
-  }
-  const estimate = await priceStudioSteps(steps);
-  const production = await StudioProduction.create({ userId: req.user._id, projectId: input.projectId, sourceProductionId: source ? String(source._id) : undefined, title: project!.title, snapshot, settings, steps, estimate, expiresAt: new Date(Date.now() + 10 * 60000) });
-  await studioLog(production, "waiting", "Production plan prepared. Awaiting credit approval.");
-  res.status(201).json({ production });
+  res.status(201).json({production:await prepareProduction(String(req.user._id),req.body)});
 }));
 
 studioRouter.get("/productions/:id", wrap(async (req, res) => {
@@ -95,7 +61,11 @@ studioRouter.get("/productions/:id", wrap(async (req, res) => {
   const assetIds = production.steps.map((s: any) => s.assetId).filter(Boolean);
   const assets = await MediaAsset.find({ _id: { $in: assetIds }, userId: req.user._id, deletedAt: null }).lean();
   const events = await StudioEvent.find({ productionId: production._id, userId: req.user._id }).sort({ _id: -1 }).limit(300).lean();
-  res.json({ production, assets: assets.map(a => ({ ...a, url: undefined })), events: events.reverse() });
+  const exports=await VideoExport.find({productionId:production._id,userId:req.user._id}).select("status progress error revision completedAt").sort({createdAt:-1}).limit(10).lean();
+  const reserve=production.reservationId?await CreditReservation.findOne({_id:production.reservationId,userId:req.user._id}).select("credits remainingCredits status").lean():null;
+  const remaining=reserve?.remainingCredits??reserve?.credits??0;
+  const budget=reserve?{approved:reserve.credits,remaining,settled:production.steps.filter((s:any)=>s.charged).reduce((n:number,s:any)=>n+s.credits,0)+(exports.some((j:any)=>j.status==="completed")?Number(production.estimate.renderCredits||0):0),status:reserve.status}:null;
+  res.json({ production, budget, exports, assets: assets.map(a => ({ ...a, url: undefined })), events: events.reverse() });
 }));
 studioRouter.get("/productions/:id/edit", wrap(async (req, res) => {
  const production = await own(req);
@@ -107,7 +77,7 @@ studioRouter.get("/productions/:id/edit", wrap(async (req, res) => {
 }));
 studioRouter.post("/productions/:id/edit-command", wrap(async (req, res) => {
  const production = await own(req), input = z.object({ message: z.string().min(3).max(1000), revision: z.number().int().nonnegative() }).parse(req.body);
- if (!production.timeline?.length) return res.status(409).json({ error: "Complete the production rough cut before editing." });
+ if (!production.timeline?.length && !(production.snapshot as any)?.manual) return res.status(409).json({ error: "Complete the production rough cut before editing." });
  res.json(await applyProductionEdit(production, input.message, input.revision));
 }));
 
@@ -122,8 +92,9 @@ studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {
   if (!production.expiresAt || production.expiresAt < new Date()) fail("Quote expired; prepare a new plan");
   if (production.estimate.missingPricing.length || production.estimate.credits == null) fail("Verified model pricing must be configured before execution");
   if (maxCredits < production.estimate.credits) fail("Spending limit is lower than the production estimate");
+  if((production.settings as any).autoExport && !env.RENDER_QUEUE_ENABLED)fail("Enable the FFmpeg render queue before approving automatic MP4 production",503);
   const ready = await readiness();
-  if (!Object.values(ready).every(Boolean)) fail("Configure Redis, R2, Gemini, and start the Studio worker before approving paid generation", 503);
+  if (!Object.values(ready).every(Boolean)) fail("Configure Redis, R2, an AI provider and the Studio worker before approving generation", 503);
   const session = await mongoose.startSession();
   let updated: any;
   try {
@@ -152,30 +123,7 @@ studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {
 }));
 
 studioRouter.post("/productions/:id/control", wrap(async (req, res) => {
-  const production = await own(req);
-  const { action } = z.object({ action: z.enum(["pause", "resume", "cancel", "retry"]) }).parse(req.body);
-  if (["completed", "cancelled"].includes(production.status)) return res.json({ production });
-  if (action === "pause") {
-    await StudioProduction.updateOne({ _id: production._id, status: { $in: ["queued", "running"] } }, { $set: { control: "pause" } });
-  } else if (action === "cancel") {
-    await StudioProduction.updateOne({ _id: production._id }, { $set: { control: "cancel" } });
-    const session = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        const cancelled = await StudioProduction.findOneAndUpdate({ _id: production._id, status: { $nin: ["completed", "cancelled"] }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }, { $set: { status: "cancelled" } }, { new: true, session });
-        if (cancelled?.reservationId) await closeStudioReserve(String(cancelled.reservationId), "production_cancelled", session);
-      });
-    } finally { await session.endSession(); }
-  } else {
-    if (!["paused", "failed"].includes(production.status)) fail("Only paused or failed work can resume. Uncertain provider requests require a new regeneration quote.");
-    if (!await studioWorkerOnline()) fail("Studio worker is offline", 503);
-    const steps = production.steps.map((s: StudioStep) => s.status === "failed" ? { ...s, status: "pending", error: undefined } : s);
-    const updated = await StudioProduction.findOneAndUpdate({ _id: production._id, status: production.status, control: { $ne: "cancel" }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: { $lt: new Date() } }] }, { $set: { status: "queued", control: "run", steps, error: "" }, $inc: { queueRevision: 1 } }, { new: true });
-    if (!updated) fail("Wait for the current operation to finish");
-    await enqueueStudio(updated).catch(() => null);
-  }
-  await studioLog(production, action === "cancel" ? "cancelled" : "waiting", `${action} requested. Already-submitted provider work may finish before pending work stops.`);
-  res.json({ production: await own(req) });
+  res.json({production:await controlProduction(String(req.user._id),idSchema.parse(req.params.id),req.body)});
 }));
 
 studioRouter.get("/assets/:assetId/url", wrap(async (req, res) => {
