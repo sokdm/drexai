@@ -21,11 +21,11 @@ export const GatewayUsage = model("GatewayUsage", gatewayUsageSchema);
 const cache = new Map<string, { expires: number; value: any }>();
 export async function routerCatalog(kind: "text" | "image" | "video" | "voice" | "transcription") {
   const endpoint = kind === "image" ? "images/models" : kind === "video" ? "videos/models" : "models";
-  const cached = cache.get(endpoint); if (cached && cached.expires > Date.now()) return cached.value.filter((m:any)=>!blockedModel(m.id));
+  const cached = cache.get(endpoint); if (cached && cached.expires > Date.now()) return cached.value.filter((m:any)=>!blockedModel(m.id)&&(kind!=="text"||Number(m.pricing?.prompt)>0||Number(m.pricing?.completion)>0));
   const response = await fetch(base + endpoint, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error("OpenRouter model discovery is unavailable. Existing direct integrations remain available.");
   const data = await response.json(); if (!Array.isArray(data.data)) throw new Error("Invalid OpenRouter catalog");
-  cache.set(endpoint, { expires: Date.now() + 300000, value: data.data }); return data.data.filter((m:any)=>!blockedModel(m.id));
+  cache.set(endpoint, { expires: Date.now() + 300000, value: data.data }); return data.data.filter((m:any)=>!blockedModel(m.id)&&(kind!=="text"||Number(m.pricing?.prompt)>0||Number(m.pricing?.completion)>0));
 }
 export async function verifiedRouterModel(id: string, kind: "text" | "image" | "video" | "voice" | "transcription") {
   const models = await routerCatalog(kind), record = models.find((m: any) => m.id === routerId(id));
@@ -48,7 +48,7 @@ export async function routerResponse(endpoint: string, body?: any, timeout = 180
     console.warn(JSON.stringify({event:"openrouter_rejected",endpoint,model:body?.model,status:response.status,requestId:response.headers.get("x-request-id"),parameters:body?Object.keys(body):[]}));
     const detail = String(data.error?.message || "Review provider access, balance and model availability");
     const privacy = /training violation|guardrail restrictions|data policy/i.test(detail);
-    const definiteTextFailure = endpoint === "chat/completions" && response.status === 503 && !!data.error && !data.id && !data.generation_id;
+    const definiteTextFailure = endpoint === "chat/completions" && [502,503].includes(response.status) && !!data.error && !data.id && !data.generation_id && !Number(data.usage?.cost);
     throw Object.assign(new Error(privacy ? "Your OpenRouter account privacy policy blocks this model's available provider. Choose another model in Admin / Providers, or review https://openrouter.ai/settings/privacy. Your privacy settings were not changed." : `OpenRouter request failed (${response.status}): ${detail.slice(0, 500)}`), { providerRejected: response.status < 500 || definiteTextFailure, status: response.status, privacyBlocked: privacy });
   }
   return response;
@@ -75,7 +75,7 @@ export async function routerText(input: TextInput) {
    console.warn(JSON.stringify({event:"text_route_failure",model:candidate.model,status:error.status,code:error.code,name:error.name,emitted,nextApproved:index<candidates.length-1}));
    const freeTimeout=free && !emitted && /abort|timeout|timed out/i.test(error.message);
    const freeQuota=free && (error.code === "FREE_AI_LIMIT" || error.code === "INCOMPLETE_PROVIDER_OUTPUT");
-   if (index === candidates.length - 1 || emitted || !(freeTimeout || freeQuota || error.providerRejected && [404,429,503].includes(error.status))) throw error;
+   if (index === candidates.length - 1 || emitted || !(freeTimeout || freeQuota || error.providerRejected && [403,404,429,502,503].includes(error.status))) throw error;
   }
  }
  throw new Error("No approved text model is available");

@@ -107,21 +107,7 @@ export async function quoteAutomaticCredits(input: any) {
     input = { ...input, requestedModel: input.model, model };
     estimate = await estimateRouterCost(input, values);
   }
-  if (estimate.cost.isZero()) {
-    const record = await verifiedRouterModel(input.model, "text");
-    const { verifiedFreeText } = await import("./freeAiLimits.js");
-    if (!verifiedFreeText(record) || input.settings?.multimodal) throw new Error("Zero-cost requests require a verified free text model.");
-    if (!record.supported_parameters?.includes("max_tokens") || !record.supported_parameters.includes("response_format")) throw new Error("Select a compatible free model with structured output and bounded tokens, or approve a paid model.");
-    const freeFallbacks: any[] = [];
-    const catalog = await (await import("./openrouter.js")).routerCatalog("text");
-    for (const candidate of catalog) {
-      if (candidate.id === record.id || !verifiedFreeText(candidate) || !candidate.architecture?.output_modalities?.includes("text") || !candidate.supported_parameters?.includes("max_tokens") || !candidate.supported_parameters?.includes("response_format") || !(candidate.context_length >= estimate.limits.maxInputTokens + estimate.limits.maxOutputTokens)) continue;
-      const model = "openrouter/" + candidate.id;
-      try { await (await import("./platformControl.js")).assertProviderBudget(model, 0); freeFallbacks.push({ model, maxPrice: { prompt: 0, completion: 0, request: 0 } }); } catch { continue; }
-      if (freeFallbacks.length === 2) break;
-    }
-    return { allowed: true, credits: input.feature === "story_generation" ? values.minimumCredits : 0, serviceMinimumCredits: input.feature === "story_generation" ? values.minimumCredits : 0, feature: input.feature, provider: "openrouter", model: input.model, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: 0, pricingVersion: policy.revision, pricingSource: estimate.source, requestLimits: { ...estimate.limits, fallbacks: freeFallbacks, ...(input.feature === "story_generation" ? { freeDeadlineMs: 60000 } : {}), approvedCostUsd: 0 }, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
-  }
+  if (estimate.cost.lte(0)) throw new Error("A verified paid model price is required; free models are disabled.");
   const requestLimits: any = { ...estimate.limits }, candidates: any[] = [];
   if (!input.settings?.singleModel && !["text_to_image", "image_to_video", "voice_generation", "short_clip_analysis", "ai_motion_prompt", "full_video_transcription"].includes(input.feature)) {
     const model = "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
@@ -139,5 +125,5 @@ export async function quoteAutomaticCredits(input: any) {
   if (estimate.cost.gt(values.maxJobUsd)) throw new Error("Estimated provider cost exceeds the maximum per-job spending limit");
   const packages = await CreditPackage.find({ active: true, currency: "USD" }).lean();
   const calculation = calculateCreditPrice(estimate.cost.toString(), packages, values, Number(input.quantity || 1), input.feature === "text_to_image");
-  return { allowed: true, ...calculation, serviceMinimumCredits: input.feature === "story_generation" ? values.minimumCredits : 0, feature: input.feature, provider: "openrouter", model: input.model, requestedModel: input.requestedModel, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: estimate.cost.toNumber(), pricingVersion: policy.revision, pricingSource: estimate.source, pricingVerifiedAt: estimate.verifiedAt, requestLimits, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
+  return { allowed: true, ...calculation, serviceMinimumCredits: 0, feature: input.feature, provider: "openrouter", model: input.model, requestedModel: input.requestedModel, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: estimate.cost.toNumber(), pricingVersion: policy.revision, pricingSource: estimate.source, pricingVerifiedAt: estimate.verifiedAt, requestLimits, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
 }

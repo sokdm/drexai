@@ -1,3 +1,5 @@
+import {chatPrompt} from "../services/chatPrompt.js";
+import {conversationContext} from "../services/conversationMemory.js";
 import {freeChatTerms,admitChatMessage,publicChatError} from "../services/chatAccess.js";
 import { scriptsRouter } from "./scripts.js";
 import { researchAgentRouter } from "./researchAgent.js";
@@ -53,7 +55,7 @@ aiRouter.post("/chat", async (req, res, next) => {
     const context = await loadContext(String(req.user._id), input.projectId, input.nicheId);
     const answer = await geminiText({ model: quote.model, userId: String(req.user._id), reservationId: String(reservation._id), requestLimits: (quote as any).requestLimits,
       system: "You are Drex AI, a YouTube research and story-development assistant. Be practical, original, and label inferences. Do not invent private analytics.",
-      prompt: `Context:\n${JSON.stringify(context)}\n\nConversation:\n${conversation.messages.map((m: any) => `${m.role}: ${m.content}`).join("\n")}\n\nAnswer the latest user message.`
+      prompt: chatPrompt(input.message,[JSON.stringify(context),conversationContext(conversation.messages,input.message)],quote.requestLimits.maxInputTokens-1000)
     });
     conversation.messages.push({ role: "assistant", content: answer });
     await conversation.save();

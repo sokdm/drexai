@@ -12,7 +12,8 @@ export function scriptShape(settings: any) { const raw = Number(String(settings.
 const planSchema = z.object({ title: z.string(), storyConcept: z.string(), summary: z.string(), characters: scriptProjectSchema.shape.characters, scenes: z.array(z.object({ title: z.string(), purpose: z.string(), duration: z.number().positive() })).min(1).max(40) });
 export function scriptBatchSchema(start: number, count: number) {
  const keys = Array.from({ length: count }, (_, i) => `scene_${start + i}`);
- const object = z.object(Object.fromEntries(keys.map(key => [key, scriptProjectSchema.shape.scenes.element])));
+ const scene = scriptProjectSchema.shape.scenes.element.extend({estimatedNarrationTiming:z.string().optional()}).transform(row=>({...row,estimatedNarrationTiming:row.estimatedNarrationTiming?.trim()||Math.max(1,Math.round(spokenWordCount(row)*3/7))+" seconds (estimated from spoken text)"}));
+ const object = z.object(Object.fromEntries(keys.map(key => [key, scene])));
  return z.preprocess((value: any) => {
   // Accept a complete legacy array, but never discard or invent missing scenes.
   if (value && Array.isArray(value.scenes) && value.scenes.length === count) {

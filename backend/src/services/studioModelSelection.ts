@@ -1,4 +1,4 @@
-﻿import {imageModels} from './imageGeneration.js';
+import {imageModels} from './imageGeneration.js';
 import {videoModels} from './videoGeneration.js';
 import {ttsModels} from './textToSpeech.js';
 import {configuredModels} from './platformControl.js';
@@ -16,7 +16,7 @@ export async function affordableStudioSettings(snapshot:any,input:any){
    if(kind==='video'&&(!candidate.qualities.includes(settings.quality)||!candidate.aspectRatios.includes(settings.aspectRatio)||!candidate.nativeAudio))continue;
    if(kind==='voice'&&!candidate.languages.includes(settings.language))continue;
    const proposed={...settings,[key]:candidate.id,...(kind==='voice'?{voiceId:candidate.voices.includes(settings.voiceId)?settings.voiceId:candidate.voices[0],characterVoices:{}}:{})};
-   const steps=buildStudioSteps(snapshot,proposed).filter(s=>s.kind===(kind==='voice'?'audio':kind));
+   const steps=buildStudioSteps(snapshot,{...proposed,narration:kind==='voice'&&proposed.narration,video:kind==='video'&&proposed.video}).filter(s=>s.kind===(kind==='voice'?'audio':kind));
    const quote=await priceStudioSteps(steps);if(quote.credits==null||quote.missingPricing.length)continue;
    options.push({settings:proposed,credits:quote.credits,model:candidate.id,steps});
    if(!best||quote.credits<best.credits)best={settings:proposed,credits:quote.credits,model:candidate.id};

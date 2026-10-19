@@ -13,7 +13,7 @@ export function AIAssistantPage({ productionId, projectId, productionSettings, a
  const requestId=useRef(crypto.randomUUID()),restoredChat=useRef(false);
  const historyKey="drex-agent:"+(onApplyPrompt?"image":productionSettings?"studio":"research")+":"+(projectId||"general");
  useEffect(()=>{if(conversationId)localStorage.setItem(historyKey,conversationId);},[conversationId,historyKey]);
- const mode = "free";
+ const mode = "configured";
  const [limits,setLimits]=useState<any>(null);
  const refreshLimits=()=>api<any>("/api/ai/agent/limits").then(setLimits).catch(()=>{});
  useEffect(()=>{void refreshLimits();const timer=setInterval(()=>void refreshLimits(),60000);return()=>clearInterval(timer);},[]);

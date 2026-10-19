@@ -92,12 +92,12 @@ test("one-second scripts retain one scene and complete through the durable worke
  assert.equal(saved.status,"completed");assert.equal(calls,2);assert.equal(project.scenes.length,1);assert.equal(project.targetDuration,"1 second");assert.equal(project.scenes[0].estimatedDurationSeconds,1);assert.equal(project.prompts.durationEstimate.needsReview,false);
 });
 
-test("completed free scripts retain the approved service minimum and settle once",async()=>{
+test("legacy free script quotes cannot reserve even the old one-credit minimum",async()=>{
  const before=await Wallet.findOne({userId:user._id});
- const r=await reserveCredits(String(user._id),{credits:1,serviceMinimumCredits:1,feature:"story_generation",provider:"openrouter",model:"openrouter/fixture:free",creditUsd:"0.018",assumptions:{}},"free-script-service");
- await settleReservation(String(r._id),0);await settleReservation(String(r._id),0);
- const after=await Wallet.findOne({userId:user._id});assert.equal(after.availableCredits,before.availableCredits-1);assert.equal(after.spentCredits,before.spentCredits+1);
+ await assert.rejects(()=>reserveCredits(String(user._id),{credits:1,serviceMinimumCredits:1,feature:"story_generation",provider:"openrouter",model:"openrouter/fixture:free"},"free-script-service"),/retired AI route/);
+ const after=await Wallet.findOne({userId:user._id});assert.equal(after.availableCredits,before.availableCredits);assert.equal(after.spentCredits,before.spentCredits);
 });
+
 test("free script timeouts release the reservation while preserving saved scenes",async()=>{
  const j=await job();j.quote={...j.quote,estimatedCostUsd:0,model:"openrouter/fixture/script:free"};await j.save();
  await processScriptJob(j,async()=>{throw new DOMException("aborted due to timeout","TimeoutError");});

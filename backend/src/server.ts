@@ -77,7 +77,7 @@ if (env.SERVE_FRONTEND) {
 app.use(errorHandler);
 
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors: { origin: env.CLIENT_ORIGIN, credentials: true } });
+const io = new Server(httpServer, { transports: ["websocket"], cors: { origin: env.CLIENT_ORIGIN, credentials: true } });
 setRealtimeServer(io);
 
 await connectDatabase();

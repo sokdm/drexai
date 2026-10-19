@@ -1,4 +1,4 @@
-﻿export function blockedModel(id:string){return /gemini|(?:^|\/)google\/|^veo-|(?:^|\/)veo-/i.test(id||'');}
+export function blockedModel(id:string){return /gemini|(?:^|\/)google\/|^veo-|(?:^|\/)veo-/i.test(id||'') || /(?:^|\/)free$|:free$/i.test(id||'');}
 export function assertAllowedModel(id:string){if(blockedModel(id))throw Object.assign(new Error('This retired AI route is disabled. Prepare a new operation quote with an available model.'),{code:'MODEL_RETIRED',providerRejected:true,status:404});}
 export const safeTextModel=(id:string)=>blockedModel(id)?'openrouter/openai/gpt-4.1-mini':id;
 

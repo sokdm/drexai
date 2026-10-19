@@ -50,7 +50,7 @@ export async function advanceStoryTask(taskId:string){
  await AIConversation.updateOne({_id:task.conversationId,userId:task.userId},{$set:{projectId:project._id}});
  if(!task.productionId && task.input.productionSettings){
  const existing=await (await import("../models/StudioProduction.js")).StudioProduction.findOne({"snapshot.agentTaskId":String(task._id),userId:task.userId});
- const production=existing||await prepareProduction(String(task.userId),{projectId:String(project._id),settings:task.input.productionSettings},true,String(task._id));
+ const production=existing||await prepareProduction(String(task.userId),{projectId:String(project._id),settings:{...task.input.productionSettings,agentSelectModels:true}},true,String(task._id));
 
  task.productionId=production._id;
  }
