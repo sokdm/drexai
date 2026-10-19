@@ -9,7 +9,7 @@ export async function routerPricing(id: string, kind: string) {
   const key = kind + ":" + id, cached = cache.get(key); if (cached && cached.expires > Date.now()) return cached.data;
   const remote = routerId(id);
   const record = await verifiedRouterModel(id, kind as any);
-  let pricing = record.pricing || record.pricing_skus;
+  let pricing = kind === "video" ? record.pricing_skus || record.pricing : record.pricing || record.pricing_skus;
   if (kind === "image") {
     const response = await fetch(`https://openrouter.ai/api/v1/images/models/${remote}/endpoints`, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error("OpenRouter image endpoint pricing is unavailable");

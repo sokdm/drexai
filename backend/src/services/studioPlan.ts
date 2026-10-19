@@ -66,8 +66,9 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
     const modelDurations=videoModels.find(m => m.id === settings.videoModel)!.durations;
     const requestedDuration=Math.max(1,Number(scene.estimatedDurationSeconds)||settings.targetSeconds/scenes.length);
     const idealLength=Math.max(modelDurations[0],Math.ceil(requestedDuration/settings.maxClipsPerScene));
-    const durationSeconds=[...modelDurations].sort((a,b)=>a-b).find(n=>n>=idealLength)||Math.max(...modelDurations);
     const lines = sceneDialogue(scene);
+    const sortedDurations=[...modelDurations].sort((a,b)=>a-b);
+    const durationSeconds=sortedDurations.find(n=>n>=idealLength&&(!lines.length||segmentDialogue(lines,n).length<=settings.maxClipsPerScene))||Math.max(...modelDurations);
     const segments = segmentDialogue(lines, durationSeconds);
     if (segments.length > settings.maxClipsPerScene) throw new Error(`Scene ${scene.order} needs ${segments.length} dialogue clips. Split it into more scenes or increase the clip limit before approving costs.`);
     const characters = snapshot.characters.filter(c => (scene.characters ?? []).includes(c.name));
