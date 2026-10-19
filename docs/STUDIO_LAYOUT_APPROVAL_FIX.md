@@ -1,0 +1,15 @@
+# Studio layout, speech pricing and approval correction
+
+Verified code causes: multiple CSS rules gave the nested chat a viewport-sized minimum height without a bounded grid row; the center column sized itself from its contents; at laptop widths older rules moved chat below the center. Large estimates, scenes and logs therefore grew the page. The workspace now fixes desktop column heights with min-width/min-height zero and internal scrolling. Mobile stacks the same bounded panels. Chat feed scrolls independently while its composer stays visible; estimates and tool details collapse.
+
+The reported gemini-3.8-flash-tts / character error is a missing direct-provider pricing rule. The previous speech adapter only accepted hard-coded Gemini IDs and automatic pricing deliberately rejected unknown speech token-to-character conversions. This could leave narration unpriced and the total null (displayed as zero by older spending-limit UI). No paid rate was fabricated.
+
+Verified public OpenRouter discovery on 2026-10-19: elevenlabs/eleven-flash-v2.5 exists, produces speech, lists 21 voices, accepts MP3 output and uses character-based pricing. Its public model page and catalog are the sources; request-time pricing is read live through the existing pricing engine, not hard-coded. Current published price was $20/million characters, a temporary discounted rate. Endpoint retrieval and documentation checks were unauthenticated and non-billable. No speech generation was submitted. Other speech token-pricing models still require a verified override; they are never silently substituted.
+
+The new adapter supports that model's documented voice IDs and single-speaker narration. Existing scripts/scenes are preserved. Unpriced plans offer an explicit action to prepare a new ElevenLabs narration quote for review. Changing the model does not submit speech or reserve credits. Native video dialogue remains in the video price. Direct models remain available when their credentials and prices are configured.
+
+The old production approval route and the chat now delegate to the same ensureProductionApprovals / approveCreditCard service. Both UI locations use the same card component and synchronize decisions immediately. MongoDB transaction, exact scope digest, quote expiry, wallet balance, readiness, script review, idempotent reservation, durable outbox and worker scope checks remain enforced. Approved outputs settle progressively and unused reserves release. Failed operations preserve completed assets and require a new scope/quote as appropriate.
+
+See credit-approvals.test.mjs, studio-speech-pricing.test.mjs and studio-bounded-layout.spec.ts for mocked, non-billable validation. No production wallet or stored settings were edited. Deploy web and Studio workers together. Existing unpriced plans must be explicitly re-quoted; changing code cannot retroactively authorize a different paid model.
+
+Sources: https://openrouter.ai/docs/guides/overview/multimodal/tts ; https://openrouter.ai/elevenlabs/eleven-flash-v2.5 ; https://openrouter.ai/api/v1/models?output_modalities=speech

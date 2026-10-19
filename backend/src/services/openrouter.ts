@@ -133,10 +133,11 @@ export async function routerImages(settings: any) {
 }
 export async function routerSpeech(settings: any) {
   await verifiedRouterModel(settings.model, "voice");
-  // The shipped adapter exposes the existing documented Gemini voice roster only.
-  if (!/^google\/gemini-3\.8-flash(?:-lite)?-tts$/.test(routerId(settings.model))) throw new Error("This speech model does not have a verified voice configuration");
+  // Only adapters with a documented voice roster are accepted.
+  if (!/^google\/gemini-3\.8-flash(?:-lite)?-tts$/.test(routerId(settings.model)) && routerId(settings.model)!=="elevenlabs/eleven-flash-v2.5") throw new Error("This speech model does not have a verified voice configuration");
+  if(routerId(settings.model)==="elevenlabs/eleven-flash-v2.5"){const record=await verifiedRouterModel(settings.model,"voice");if(!record.supported_voices?.includes(settings.voiceId)||settings.mode==="multi")throw new Error("Unsupported voice or multi-speaker setting for the selected speech model");}
   const input = settings.mode === "multi" ? settings.speakers.map((s: any) => ({ text: s.text, voice: s.voice, instructions: s.style || settings.style })) : settings.text;
-  const response = await routerResponse("audio/speech", { model: routerId(settings.model), input, voice: settings.voiceId, instructions: `${settings.style || "natural"}. Language: ${settings.language}`, response_format: "mp3" });
+  const response = await routerResponse("audio/speech", { model: routerId(settings.model), input, voice: settings.voiceId, ...(routerId(settings.model).startsWith("google/")?{instructions: `${settings.style || "natural"}. Language: ${settings.language}`} : {}), response_format: "mp3" });
   const bytes = Buffer.from(await response.arrayBuffer()), directory = await mkdtemp(path.join(tmpdir(), "drex-router-speech-"));
   try {
     const source = path.join(directory, "source.mp3"), file = path.join(directory, "narration.wav"); await writeFile(source, bytes);

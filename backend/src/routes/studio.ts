@@ -1,3 +1,4 @@
+import {ensureProductionApprovals,approveCreditCard} from "../services/agentApprovals.js";
 import {CreditReservation} from "../models/CreditReservation.js";
 import { prepareProduction, controlProduction } from "../services/productionTools.js";
 import { VideoEdit, VideoExport } from "../models/VideoEdit.js";
@@ -44,7 +45,7 @@ async function readiness() {
 studioRouter.get("/config", wrap(async (req, res) => {
   const projects = await AIProject.find({ userId: req.user._id }).sort({ updatedAt: -1 }).limit(100).lean();
   const characters = await CharacterProfile.find({ userId: req.user._id }).lean();
-  res.json({ commercialEnabled: (await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled, imageModels: await configuredModels("image", imageModels), videoModels: await configuredModels("video", videoModels), voiceModels: await configuredModels("voice", ttsModels), projects, characters, readiness: await readiness() });
+  res.json({ commercialEnabled: (await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled, imageModels: await configuredModels("image", imageModels), videoModels: await configuredModels("video", videoModels), voiceModels: (await configuredModels("voice", ttsModels)).filter(m=>m.id.startsWith("openrouter/")||!!env.GEMINI_API_KEY), projects, characters, readiness: await readiness() });
 }));
 studioRouter.get("/productions", wrap(async (req, res) => {
   const query: any = { userId: req.user._id };
@@ -83,44 +84,13 @@ studioRouter.post("/productions/:id/edit-command", wrap(async (req, res) => {
 
 studioRouter.post("/productions/:id/approve", wrap(async (req, res) => {
   const production = await own(req);
-  if ((production.snapshot as any)?.product && !(await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled) fail("Product commercials are disabled by the administrator");
-  if((production.snapshot as any)?.requiresScriptReview){const project=await AIProject.findOne({_id:production.projectId,userId:req.user._id});if(!project?.approvedAt)fail("Review and approve the saved script before starting media generation");}
-  const { maxCredits } = z.object({ maxCredits: z.number().int().nonnegative().max(1000000) }).parse(req.body);
-  if (production.status !== "draft") {
-    if (production.approvedAt) return res.json({ production });
-    fail("This plan cannot be approved");
-  }
-  if (!production.expiresAt || production.expiresAt < new Date()) fail("Quote expired; prepare a new plan");
-  if (production.estimate.missingPricing.length || production.estimate.credits == null) fail("Verified model pricing must be configured before execution");
-  if (maxCredits < production.estimate.credits) fail("Spending limit is lower than the production estimate");
-  if((production.settings as any).autoExport && !env.RENDER_QUEUE_ENABLED)fail("Enable the FFmpeg render queue before approving automatic MP4 production",503);
-  const ready = await readiness();
-  if (!Object.values(ready).every(Boolean)) fail("Configure Redis, R2, an AI provider and the Studio worker before approving generation", 503);
-  const session = await mongoose.startSession();
-  let updated: any;
-  try {
-    await session.withTransaction(async () => {
-      const fresh = await StudioProduction.findOne({ _id: production._id, status: "draft", control: { $ne: "cancel" } }).session(session);
-      if (!fresh) return;
-      if (production.sourceProductionId) {
-        const source = await StudioProduction.findOne({ _id: production.sourceProductionId, userId: req.user._id }).session(session);
-        if (source && !["completed", "cancelled"].includes(source.status)) {
-          if (!["paused", "failed", "needs_review"].includes(source.status) || (source.leaseUntil && source.leaseUntil > new Date())) fail("Source production is active");
-          source.status = "cancelled"; source.control = "cancel";
-          await source.save({ session });
-          if (source.reservationId) await closeStudioReserve(String(source.reservationId), "replaced_by_regeneration_plan", session);
-        }
-      }
-      const reservation: any = await reserveCredits(String(req.user._id), { credits: maxCredits, feature: "ai_studio_production", productionId: production._id, ...(production.steps.some((s: any) => s.input.model.startsWith("openrouter/")) ? { provider: "openrouter", estimatedCostUsd: production.steps.filter((s: any) => !s.reused && s.input.model.startsWith("openrouter/")).reduce((total: number, s: any) => total + Number(s.pricing?.providerCostUsd || 0), 0) } : {}) }, `studio-budget:${production._id}`, session);
-      updated = await StudioProduction.findOneAndUpdate({ _id: production._id, status: "draft" }, { $set: { reservationId: reservation._id, maxCredits: reservation.credits, approvedAt: new Date(), status: "queued", control: "run" }, $inc: { queueRevision: 1 } }, { new: true, session });
-    });
-  } finally { await session.endSession(); }
-  if (updated) {
-    for (const [name, voicePreference] of Object.entries(updated.settings.characterVoices ?? {})) await CharacterProfile.updateOne({ projectId: updated.projectId, userId: req.user._id, name }, { $set: { voicePreference } });
-    await studioLog(updated, "waiting", `Production approved with a maximum of ${updated.maxCredits} credits.`);
-    await enqueueStudio(updated).catch(() => null);
-  }
-  res.json({ production: updated ?? await own(req) });
+  const {maxCredits}=z.object({maxCredits:z.number().int().nonnegative().max(1000000)}).parse(req.body);
+  const cards=await ensureProductionApprovals(String(req.user._id),String(production._id));
+  const card=cards.approvals.find((a:any)=>a.scope==="production"&&a.status==="pending");
+  if(!card){if(production.approvedAt)return res.json({production});fail(production.estimate.missingPricing?.length?"Pricing unavailable: "+production.estimate.missingPricing.join("; ")+". Select a supported priced model and refresh the estimate.":"Prepare a current production quote before approval");}
+  if(maxCredits<card!.credits)fail("Spending limit is lower than the production estimate");
+  await approveCreditCard(String(req.user._id),String(card!._id),card!.credits);
+  res.json({production:await own(req)});
 }));
 
 studioRouter.post("/productions/:id/control", wrap(async (req, res) => {

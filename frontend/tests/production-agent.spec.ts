@@ -23,7 +23,7 @@ for (const width of [390, 1440]) test(`production activity and budget live insid
   await page.goto(`/dashboard/ai-studio?productionId=${productionId}&projectId=${projectId}`);
   await expect(page.locator(".agent-feed").getByText("Real saved production plan awaits approval")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Live activity", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Approve Entire Production Budget", exact: true }).click();
+  if(width===1440){await page.getByText("Production estimate: 12 credits",{exact:true}).click();await page.locator(".studio-center").getByRole("button",{name:"Approve Entire Production Budget",exact:true}).click();}else await page.locator(".agent-feed").getByRole("button", { name: "Approve Entire Production Budget", exact: true }).click();
   await expect.poll(() => approvals).toBe(1);
   await expect(page.locator(".agent-transaction")).toContainText("Transaction: reserved");
   manual=true;await page.reload();await expect(page.getByRole("link",{name:"Open this timeline in Video Editor"})).toBeVisible();

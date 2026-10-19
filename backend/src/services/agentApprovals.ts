@@ -43,12 +43,18 @@ export async function ensureProductionApprovals(userId:string,productionId:strin
   const activity=await StudioEvent.find({productionId:p!._id,userId,...(record.scope==='operation'?{stepKey:{$in:record.stepKeys}}:{})}).select('message level createdAt').sort({createdAt:-1}).limit(30).lean();
   cards.push({...publicApproval(record),render,blockedReason:!reviewed?'Review and approve the script before generating media.':undefined,activity:activity.reverse().map(e=>({...e,message:/usd|profit|margin|\$/i.test(e.message)?'Generation stopped; completed work is preserved.':e.message})),progress:{completed:selected.filter((s:any)=>['completed','skipped'].includes(s.status)).length+(render?.status==='completed'?1:0),total:selected.length+(record.scope==='production'&&p!.settings.autoExport?1:0),productionStatus:p!.status},transaction:reserve?{status:reserve.status,reserved:reserve.credits,remaining:reserve.remainingCredits??reserve.credits,settled}:null});
  }
- return {approvals:cards,wallet};
+ return {approvals:cards,wallet,pricingError:p!.estimate.missingPricing?.length?"Pricing unavailable: "+p!.estimate.missingPricing.join("; ")+". Select a supported priced narration model, or turn off optional narration, then refresh the estimate.":undefined};
 }
-export async function approveCreditCard(userId:string,approvalId:string,credits:number,ready=async()=>env.STUDIO_QUEUE_ENABLED&&persistentStorageConfigured()&&Boolean(env.OPENROUTER_API_KEY||env.GEMINI_API_KEY)&&await studioWorkerOnline()){
+export async function approveCreditCard(userId:string,approvalId:string,credits:number,ready=async()=>{
+ if(!env.STUDIO_QUEUE_ENABLED)fail('The Studio background worker queue is disabled. Enable the Studio worker before approving generation.',503);
+ if(!persistentStorageConfigured())fail('The Studio media storage is unavailable. Check the storage connection before retrying.',503);
+ if(!env.OPENROUTER_API_KEY&&!env.GEMINI_API_KEY)fail('The Studio AI connection is unavailable. Reconnect the AI service before retrying.',503);
+ if(!await studioWorkerOnline())fail('The Studio background worker is offline. Start the Studio worker, then retry approval.',503);
+ return true;
+}){
  const original=await CreditApproval.findOne({_id:approvalId,userId});if(!original)fail('Approval not found',404);if(original!.status==='approved'||original!.status==='completed')return publicApproval(original);
  if(original!.status!=='pending')fail('This request is no longer awaiting approval');
- if(!await ready())fail('Generation is temporarily unavailable. Nothing has been charged.',503);
+ if(!await ready())fail('The Studio background worker or media storage is unavailable. Retry after the service reconnects; no credits were reserved.',503);
  const session=await mongoose.startSession();let updated:any;
  try{await session.withTransaction(async()=>{
   const a=await CreditApproval.findOne({_id:approvalId,userId}).session(session);if(!a)fail('Approval not found',404);if(a!.status==='approved'||a!.status==='completed'){updated=a;return;}if(a!.status!=='pending')fail('This request is no longer awaiting approval');

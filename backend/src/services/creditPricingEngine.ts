@@ -84,6 +84,13 @@ export async function estimateRouterCost(input: any, policy: any) {
     if (rates[key] === undefined) throw new Error("Verify the selected resolution and native-audio video pricing before use");
     return { cost: new Decimal(rates[key]).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits };
   }
+  if(kind==="voice"&&input.model==="openrouter/elevenlabs/eleven-flash-v2.5"){
+    const record=await verifiedRouterModel(input.model,"voice");
+    if(!record.supported_voices?.includes(settings.voiceId))throw new Error("Select a supported voice before calculating narration pricing");
+    const rate=new Decimal(published.pricing.prompt||0);
+    if(rate.lte(0)||new Decimal(published.pricing.completion||0).gt(0))throw new Error("Speech pricing cannot be verified for this model");
+    return {cost:rate.mul(quantity),source:published.source,verifiedAt:published.verifiedAt,limits};
+  }
   throw new Error("Speech output token pricing cannot be safely converted to characters without a verified cost bound. Add an expiring verified override.");
 }
 export async function quoteAutomaticCredits(input: any) {
