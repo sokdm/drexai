@@ -6,6 +6,7 @@ import { videoModels, validateVideoSettings, planClipDurations } from "./videoGe
 import { ttsModels, validateTtsSettings } from "./textToSpeech.js";
 
 export const studioSettingsSchema = z.object({
+  agentSelectModels:z.boolean().default(false),
   imageModel: z.string().default(env.OPENROUTER_API_KEY ? imageModels[0].id : imageModels.find(m => !m.id.startsWith("openrouter/"))!.id),
   videoModel: z.string().default(env.OPENROUTER_API_KEY ? videoModels[0].id : videoModels.find(m => !m.id.startsWith("openrouter/"))!.id),
   voiceModel: z.string().default(env.OPENROUTER_API_KEY ? ttsModels[0].id : ttsModels.find(m => !m.id.startsWith("openrouter/"))!.id),

@@ -54,7 +54,7 @@ studioRouter.get("/productions", wrap(async (req, res) => {
 }));
 
 studioRouter.post("/plans", wrap(async (req, res) => {
-  res.status(201).json({production:await prepareProduction(String(req.user._id),req.body)});
+  res.status(201).json({production:await prepareProduction(String(req.user._id),req.body,true)});
 }));
 
 studioRouter.get("/productions/:id", wrap(async (req, res) => {

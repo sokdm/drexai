@@ -40,6 +40,8 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
     const ids = snapshot.product.assetIds || [];
     if (await MediaAsset.countDocuments({ _id: { $in: ids }, userId: userId, type: "image", deletedAt: null }) !== new Set(ids).size) fail("Product reference images are unavailable");
   }
+  let modelSelections:any[]=[];
+  if(settings.agentSelectModels&&!source){const chosen=await (await import("./studioModelSelection.js")).affordableStudioSettings(snapshot,settings);settings=chosen.settings;modelSelections=chosen.selections;}
   const steps = buildStudioSteps(snapshot, settings);
   if (source) {
     const selected = source.steps.find((s: StudioStep) => s.key === input.regenerateStepKey);
@@ -50,7 +52,7 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
       if (old?.status === "completed" && old.assetId && !dependsOnSelection && (step.kind !== "video" || old.input.nativeAudio === true) && (step.kind !== "audio" || old.input.track === step.input.track)) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
     }
   }
-  const estimate:any = await priceStudioSteps(steps);
+  const estimate:any = await priceStudioSteps(steps);estimate.modelSelections=modelSelections;
   if(settings.autoExport){
     const {GenerationPriceRule}=await import("../models/GenerationPriceRule.js");
     const rule=await GenerationPriceRule.findOne({feature:"final_rendering",provider:"ffmpeg",model:"ffmpeg",active:true});

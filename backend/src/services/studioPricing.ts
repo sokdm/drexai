@@ -7,6 +7,7 @@ import type { StudioStep } from "./studioPlan.js";
 export async function priceStudioSteps(steps: StudioStep[]) {
   const missing = new Set<string>();
   for (const step of steps) {
+    step.error=undefined;
     if (step.reused) { step.credits = 0; continue; }
     const feature = step.kind === "image" ? "text_to_image" : step.kind === "audio" ? "voice_generation" : "image_to_video";
     const provider = providerFor(step.input.model);
@@ -14,12 +15,12 @@ export async function priceStudioSteps(steps: StudioStep[]) {
     if (isOpenRouter(step.input.model)) {
       const quantity = step.kind === "audio" ? step.input.text.length : step.kind === "video" ? step.input.durationSeconds : 1;
       const quote = await createQuote({ feature, provider, model: step.input.model, quantity, unit, settings: step.input });
-      if (!quote.allowed) { missing.add(`${step.input.model}: ${(quote as any).reason}`); step.credits = 0; continue; }
+      if (!quote.allowed) { step.error="Pricing unavailable for this operation";missing.add(`${step.input.model}: ${(quote as any).reason}`); step.credits = 0; continue; }
       step.input.model = quote.model; step.credits = quote.credits; step.pricing = { ...quote, providerCostUsd: quote.estimatedCostUsd, costIsEstimate: true }; step.input.requestLimits = (quote as any).requestLimits; continue;
     }
     const rule = await GenerationPriceRule.findOne({ feature, provider, model: step.input.model, unit, active: true });
     if (!rule || rule.unit !== unit || !(rule.creditsPerUnit > 0) || !(rule.providerCostUsd > 0)) {
-      missing.add(`${step.input.model} / ${unit}`); step.credits = 0; continue;
+      step.error="Pricing unavailable for this operation";missing.add(`${step.input.model} / ${unit}`); step.credits = 0; continue;
     }
     const quantity = step.kind === "audio" ? step.input.text.length : step.kind === "video" ? step.input.durationSeconds : 1;
     const packages = await CreditPackage.find({ active: true, currency: "USD", credits: { $gt: 0 }, amount: { $gt: 0 } }).lean();
@@ -39,6 +40,6 @@ export async function priceStudioSteps(steps: StudioStep[]) {
     maxClips: steps.filter(s => s.kind === "video" && !s.reused).length,
     maxVideoSeconds: steps.filter(s => s.kind === "video" && !s.reused).reduce((sum, s) => sum + s.input.durationSeconds, 0),
     renderCredits: 0, renderMode: "browser-timeline",
-    coverage: "Veo clip pricing includes native dialogue and environmental audio. Only requested off-screen narration adds TTS costs. Dialogue clips remain whole; unused ambient clip credits are released."
+    coverage: "Video clip pricing includes native dialogue and environmental audio. Only requested off-screen narration adds TTS costs. Dialogue clips remain whole; unused ambient clip credits are released."
   };
 }

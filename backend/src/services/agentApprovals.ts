@@ -24,7 +24,9 @@ export async function ensureProductionApprovals(userId:string,productionId:strin
   const remaining=unfinished(p),first=remaining[0];
   const groups:any[]=[{scope:'production',steps:remaining,operation:'Entire production budget',credits:remaining.reduce((n:number,s:any)=>n+s.credits,0)+(p!.settings.autoExport?Number(p!.estimate.renderCredits||0):0)}];
   if(first)groups.push({scope:'operation',steps:remaining.slice(0,remaining.findIndex((s:any)=>s.kind!==first.kind||s.input.model!==first.input.model)<0?remaining.length:remaining.findIndex((s:any)=>s.kind!==first.kind||s.input.model!==first.input.model)),operation:first.kind==='image'?'Image generation':first.kind==='video'?'Video generation with native audio':'Voiceover generation'});
-  if((remaining.length||p!.steps.some((s:any)=>s.status==='completed'))&&!p!.estimate.missingPricing?.length && p!.estimate.credits!=null)for(const group of groups){
+  if(remaining.length||p!.steps.some((s:any)=>s.status==='completed'))for(const group of groups){
+   if(group.scope==='production'&&(p!.estimate.missingPricing?.length||p!.estimate.credits==null))continue;
+   if(group.steps.some((s:any)=>s.error?.startsWith('Pricing unavailable')||!Number.isSafeInteger(s.credits)||s.credits<0||s.credits===0&&!s.reused))continue;
    const credits=group.credits??group.steps.reduce((n:number,s:any)=>n+s.credits,0);const hash=approvalSignature(p,group.scope,group.steps,credits);
    await CreditApproval.findOneAndUpdate({userId,productionId,scope:group.scope,signature:hash},{$setOnInsert:{conversationId,operation:group.operation,models:[...new Set(group.steps.flatMap((s:any)=>[s.input.model,...(s.input.requestLimits?.fallbacks||[]).map((f:any)=>f.model)])),...(group.scope==='production'&&p!.settings.autoExport?['FFmpeg MP4']:[])],quantity:group.steps.length+(group.scope==='production'&&p!.settings.autoExport?1:0),credits,stepKeys:group.steps.map((s:any)=>s.key),expiresAt:p!.expiresAt}},{upsert:true,new:true});
   }
@@ -43,7 +45,7 @@ export async function ensureProductionApprovals(userId:string,productionId:strin
   const activity=await StudioEvent.find({productionId:p!._id,userId,...(record.scope==='operation'?{stepKey:{$in:record.stepKeys}}:{})}).select('message level createdAt').sort({createdAt:-1}).limit(30).lean();
   cards.push({...publicApproval(record),render,blockedReason:!reviewed?'Review and approve the script before generating media.':undefined,activity:activity.reverse().map(e=>({...e,message:/usd|profit|margin|\$/i.test(e.message)?'Generation stopped; completed work is preserved.':e.message})),progress:{completed:selected.filter((s:any)=>['completed','skipped'].includes(s.status)).length+(render?.status==='completed'?1:0),total:selected.length+(record.scope==='production'&&p!.settings.autoExport?1:0),productionStatus:p!.status},transaction:reserve?{status:reserve.status,reserved:reserve.credits,remaining:reserve.remainingCredits??reserve.credits,settled}:null});
  }
- return {approvals:cards,wallet,pricingError:p!.estimate.missingPricing?.length?"Pricing unavailable: "+p!.estimate.missingPricing.join("; ")+". Select a supported priced narration model, or turn off optional narration, then refresh the estimate.":undefined};
+ return {approvals:cards,wallet,pricingError:p!.estimate.missingPricing?.length&&!cards.some(a=>a.scope==='operation'&&a.status==='pending')?"Pricing unavailable: "+p!.estimate.missingPricing.join("; ")+". Select a supported priced narration model, or turn off optional narration, then refresh the estimate.":undefined};
 }
 export async function approveCreditCard(userId:string,approvalId:string,credits:number,ready=async()=>{
  if(!env.STUDIO_QUEUE_ENABLED)fail('The Studio background worker queue is disabled. Enable the Studio worker before approving generation.',503);
