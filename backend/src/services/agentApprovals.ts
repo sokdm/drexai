@@ -12,7 +12,7 @@ import {studioLog} from "./studioExecution.js";
 import {enqueueStudio,studioWorkerOnline} from "./studioQueue.js";
 import {persistentStorageConfigured} from "./mediaStorage.js";
 import {env} from "../config/env.js";
-const fail=(message:string,statusCode=409):never=>{throw Object.assign(new Error(message),{statusCode});};
+const fail=(message:string,statusCode=409):never=>{throw Object.assign(new Error(message),{statusCode,code:"APPROVAL_STATE"});};
 const unfinished=(p:any)=>p.steps.filter((s:any)=>!['completed','skipped'].includes(s.status));
 export function approvalSignature(p:any,scope:string,steps:any[],credits:number){return createHash('sha256').update(JSON.stringify({scope,projectId:p.projectId,snapshot:p.snapshot,settings:p.settings,steps:steps.map(s=>({key:s.key,input:s.input,credits:s.credits})),credits})).digest('hex');}
 export function publicApproval(a:any){return {_id:a._id,productionId:a.productionId,scope:a.scope,operation:a.operation,models:a.models,quantity:a.quantity,credits:a.credits,status:a.status,expiresAt:a.expiresAt,decidedAt:a.decidedAt,completedAt:a.completedAt};}
@@ -68,7 +68,13 @@ export async function approveCreditCard(userId:string,approvalId:string,credits:
  try{await session.withTransaction(async()=>{
   const a=await CreditApproval.findOne({_id:approvalId,userId}).session(session);if(!a)fail('Approval not found',404);if(a!.status==='approved'||a!.status==='completed'){updated=a;return;}if(a!.status!=='pending')fail('This request is no longer awaiting approval');
   const p=await StudioProduction.findOne({_id:a!.productionId,userId}).session(session);if(!p||p.control==='cancel'||!['draft','paused'].includes(p.status)||p.leaseUntil&&p.leaseUntil>new Date())fail('Wait for the current operation to finish');
-  if(p!.activeApprovalId&&await CreditApproval.exists({_id:p!.activeApprovalId,userId,status:'approved'}).session(session))fail('Resume or cancel the current approved operation before approving another');
+  if(p!.activeApprovalId){
+   const previous=await CreditApproval.findOne({_id:p!.activeApprovalId,userId,status:'approved'}).session(session);
+   if(previous){const priorReserve=previous.reservationId?await CreditReservation.findOne({_id:previous.reservationId,userId}).session(session):null;
+    if(!priorReserve||priorReserve.status==='reserved')fail('Resume or cancel the current approved operation before approving another');
+    const priorSteps=p!.steps.filter((s:any)=>previous.stepKeys.includes(s.key));previous.status=priorSteps.every((s:any)=>['completed','skipped'].includes(s.status))?'completed':'failed';previous.completedAt=new Date();await previous.save({session});
+   }
+  }
   if(p!.approvedAt&&p!.approvalMode!=='cards')fail('This production already has an approved budget');
   if(!a!.expiresAt||a!.expiresAt<new Date())fail('This quote expired. Prepare an updated production plan.');
   if(credits!==a!.credits)fail('Approve the exact displayed credit amount');

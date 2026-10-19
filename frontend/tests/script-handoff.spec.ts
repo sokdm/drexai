@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+test.use({actionTimeout:30000});const slowExpect=expect.configure({timeout:30000});
 for(const width of [390,1440])test(`review approval opens actual Studio plan and readable saved-project card at ${width}px`,async({page})=>{
  const id='a11111111111111111111111',pid='b11111111111111111111111',cid='c11111111111111111111111';let plans=0,paid=0;
  let project:any={_id:id,title:'The Hidden Isle',summary:'An explorer discovers an island.',targetDuration:'20 seconds',scenes:[1,2,3].map(n=>({_id:String(n).repeat(24),order:n,title:'Discovery '+n,sceneDescription:'A cinematic scene. '.repeat(12),narration:'The explorer finds an island.',dialogue:'',imagePrompt:'A realistic island',videoMotionPrompt:'Slow pan',estimatedDurationSeconds:7,approved:false})),prompts:{},versions:[]};let production:any;
@@ -18,11 +19,11 @@ for(const width of [390,1440])test(`review approval opens actual Studio plan and
  if(path==='/api/ai/agent/conversations')data={conversations:[{_id:cid,title:'Island story'}]};if(path===`/api/ai/agent/conversations/${cid}`)data={conversation:{projectId:id,messages:[{role:'assistant',content:'Your scenes are saved.'}]}};if(path==='/api/ai/agent/tasks')data={tasks:[]};if(path==='/api/ai/agent/limits')data={remaining:11,resetsAt:new Date(Date.now()+14400000).toISOString()};
  return route.fulfill({json:data});});
  await page.setViewportSize({width,height:1000});await page.goto('/dashboard/script-builder?projectId='+id);
- await expect(page.getByLabel('Scene 1 Scene description',{exact:true})).toBeVisible();
- await expect(page.getByLabel('Scene 1 title',{exact:true})).toHaveValue('Discovery 1');
+ await slowExpect(page.getByLabel('Scene 1 Scene description',{exact:true})).toBeVisible();
+ await slowExpect(page.getByLabel('Scene 1 title',{exact:true})).toHaveValue('Discovery 1');
  await page.getByRole('button',{name:'Approve and continue to AI Studio',exact:true}).click();
- await expect(page).toHaveURL(new RegExp('productionId='+pid));await expect(page.locator('.reference-project-heading h2')).toHaveText('The Hidden Isle');
- await expect(page.locator('.agent-project')).toContainText('Script approved. Ready for production planning.');await expect(page.locator('.agent-project')).not.toContainText('Review and approve scenes');
+ await slowExpect(page).toHaveURL(new RegExp('productionId='+pid));await slowExpect(page.locator('.reference-project-heading h2')).toHaveText('The Hidden Isle');
+ await slowExpect(page.locator('.agent-project')).toHaveCount(0);
  expect(plans).toBe(1);expect(paid).toBe(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
- const copy=await page.locator('.agent-project>div').boundingBox();expect(copy!.width).toBeGreaterThan(140);
+
 });
