@@ -97,7 +97,7 @@ export async function reserveCredits(userId: string, quote: any, idempotencyKey:
       for (const [key, limit] of [["global:" + day, values.globalDailyUsd], ["user:" + userId + ":" + day, values.userDailyUsd]] as const) {
         await DailySpendBudget.updateOne({ _id: key }, { $setOnInsert: { admittedUsd: 0 } }, { upsert: true, session });
         const admitted = await DailySpendBudget.updateOne({ _id: key, admittedUsd: { $lte: limit - quote.estimatedCostUsd } }, { $inc: { admittedUsd: quote.estimatedCostUsd } }, { session });
-        if (!admitted.modifiedCount) throw new Error("Daily generation spending admission limit reached. Try again after the next UTC day or contact support.");
+        if (!admitted.modifiedCount) throw Object.assign(new Error("The daily generation allowance has been reached. Try again after the next UTC day or contact support. No new credits were reserved."),{code:"APPROVAL_STATE",statusCode:429});
       }
     }
     const wallet = await ensureWallet(userId, session);

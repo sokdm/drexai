@@ -106,8 +106,8 @@ export async function runStudioProduction(id: string, providers: StudioProviders
       if (step.input.model.startsWith("openrouter/") && !step.providerJobId) await (await import("./openrouterManagement.js")).checkProviderAffordability(Number(step.pricing?.providerCostUsd));
       const assets = await MediaAsset.find({ _id: { $in: steps.map(s => s.assetId).filter(Boolean) }, userId: production.userId, deletedAt: null }).lean();
       if (step.kind === "video") {
-        const duration = sceneDuration(step.sceneId, steps, assets, production.settings.targetSeconds / production.snapshot.scenes.length);
-        if (!step.input.nativeDialogue && step.input.clipIndex >= requiredClips(duration, production.settings)) {
+        const duration = sceneDuration(step.sceneId, steps, assets, Number(production.snapshot.scenes.find((scene:any)=>String(scene._id)===step.sceneId)?.estimatedDurationSeconds)||production.settings.targetSeconds / production.snapshot.scenes.length);
+        if (!step.input.nativeDialogue && steps.filter(s=>s.kind==="video"&&s.sceneId===step.sceneId&&s.input.clipIndex<step.input.clipIndex).reduce((n,s)=>n+Number(s.input.durationSeconds),0)>=duration) {
           step.status = "skipped"; await checkpoint();
           await studioLog(production, "cancelled", `${step.label} skipped; measured audio is already covered.`, step.key);
           continue;

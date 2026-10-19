@@ -63,17 +63,23 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
   }
   if (settings.video) for (const scene of scenes) {
     if (!scene.videoMotionPrompt?.trim()) throw new Error(`Scene ${scene.order} needs a motion prompt`);
-    const durationSeconds = videoModels.find(m => m.id === settings.videoModel)!.durations[0];
+    const modelDurations=videoModels.find(m => m.id === settings.videoModel)!.durations;
+    const requestedDuration=Math.max(1,Number(scene.estimatedDurationSeconds)||settings.targetSeconds/scenes.length);
+    const idealLength=Math.max(modelDurations[0],Math.ceil(requestedDuration/settings.maxClipsPerScene));
+    const durationSeconds=[...modelDurations].sort((a,b)=>a-b).find(n=>n>=idealLength)||Math.max(...modelDurations);
     const lines = sceneDialogue(scene);
     const segments = segmentDialogue(lines, durationSeconds);
     if (segments.length > settings.maxClipsPerScene) throw new Error(`Scene ${scene.order} needs ${segments.length} dialogue clips. Split it into more scenes or increase the clip limit before approving costs.`);
     const characters = snapshot.characters.filter(c => (scene.characters ?? []).includes(c.name));
-    const count = lines.length ? segments.length : settings.maxClipsPerScene;
+    const requestedSeconds=Math.max(1,Number(scene.estimatedDurationSeconds)||settings.targetSeconds/scenes.length);
+    const plannedClips=Math.max(1,Math.ceil(requestedSeconds/durationSeconds));
+    if(!lines.length&&plannedClips>settings.maxClipsPerScene)throw new Error(`Scene ${scene.order} needs ${plannedClips} clips for its duration. Increase the clip limit or shorten the scene.`);
+    const count = lines.length ? segments.length : plannedClips;
     for (let index = 0; index < count; index++) add(scene, "video", `-${index}`, validateVideoSettings({
       ...scene, motionPrompt: scene.videoMotionPrompt, dialogueLines: segments[index] ?? [],
       characterDescriptions: characters.map(c => `${c.name}: ${c.appearance || ""}; ${c.clothing || ""}; voice guidance: ${c.voiceDescription || c.personality || "natural"}`).join("\n"),
       sourceImageAssetId: "resolved-at-execution", model: settings.videoModel, aspectRatio: settings.aspectRatio,
-      durationSeconds, quality: settings.quality, quantity: 1, clipIndex: index, nativeAudio: true, nativeDialogue: lines.length > 0
+      durationSeconds:lines.length?durationSeconds:([...modelDurations].sort((a,b)=>a-b).find(n=>n>=Math.min(durationSeconds,requestedSeconds-index*durationSeconds))||durationSeconds), quality: settings.quality, quantity: 1, clipIndex: index, nativeAudio: true, nativeDialogue: lines.length > 0
     }), `video and native audio ${index + 1}`);
 
   }
@@ -97,7 +103,7 @@ export function makeTimeline(snapshot: StudioSnapshot, settings: StudioSettings,
   return [...snapshot.scenes].sort((a, b) => a.order - b.order).map(scene => {
     const id = String(scene._id);
     const completed = steps.filter(s => s.sceneId === id && s.status === "completed");
-    const durationSeconds = sceneDuration(id, steps, assets, settings.targetSeconds / snapshot.scenes.length);
+    const durationSeconds = sceneDuration(id, steps, assets, Number(scene.estimatedDurationSeconds)||settings.targetSeconds / snapshot.scenes.length);
     let audioOffset = 0;
     let videoOffset = 0;
     const audio = completed.filter(s => s.kind === "audio").map(step => {

@@ -14,3 +14,5 @@
 .agent-feed .agent-project>div{min-width:0;overflow-wrap:break-word;word-break:normal}
 .agent-feed .agent-project strong,.agent-feed .agent-project p{display:block;line-height:1.5;margin:0 0 6px}
 .agent-feed .agent-project a{grid-column:2;justify-self:start;white-space:normal;line-height:1.5}
+
+.agent-model-picker{min-width:0;max-width:100%;margin:10px 0;padding:10px;border:1px solid var(--border,#334155);border-radius:10px}.agent-model-picker summary{cursor:pointer;font-size:.85rem}.agent-model-picker p{font-size:.8rem;overflow-wrap:anywhere}.agent-model-picker select{display:block;width:100%;min-width:0;max-width:100%;margin:8px 0}.agent-model-picker button{max-width:100%;white-space:normal}.yt-chat-feed .agent-approval-card{min-width:0;max-width:100%}.yt-video-meta{flex-wrap:wrap}

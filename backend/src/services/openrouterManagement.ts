@@ -59,13 +59,13 @@ export async function providerAccountStatus(refresh = false) {
 }
 export async function checkProviderAffordability(estimate: number) {
   const { getPricingPolicy } = await import("./creditPricingEngine.js"), policy = await getPricingPolicy();
-  if (!Number.isFinite(estimate) || estimate < 0 || estimate > policy.values.maxJobUsd) throw new Error("Provider cost is unknown or exceeds the application spending limit");
+  if (!Number.isFinite(estimate) || estimate < 0 || estimate > policy.values.maxJobUsd) throw Object.assign(new Error("This operation exceeds the generation spending limit. Choose fewer clips or a lower-cost model/quality, then refresh the quote."),{code:"APPROVAL_STATE",statusCode:409});
   const [balance, key] = await Promise.all([syncProviderRecord("balance"), syncProviderRecord("key")]);
   const fresh = (row: any) => row?.syncedAt && !row.error && Date.now() - new Date(row.syncedAt).getTime() < policy.values.maxBalanceAgeMinutes * 60000;
-  if (policy.values.requireBalanceCheck && !fresh(balance)) throw new Error("A fresh OpenRouter management balance is required before starting new work");
+  if (policy.values.requireBalanceCheck && !fresh(balance)) throw Object.assign(new Error("The generation service could not verify its available capacity. Please retry shortly; no new credits were reserved."),{code:"APPROVAL_STATE",statusCode:503});
   if (fresh(balance) && balance.values.remainingUsd < estimate || fresh(key) && key.values.limit_remaining != null && key.values.limit_remaining < estimate) {
     await adminAlert("openrouter-insufficient", "OpenRouter funds are insufficient", "A new generation was blocked before submission. Review balance and key-level limits.", "critical");
-    throw new Error("The AI provider balance is insufficient for this job. No generation was submitted; contact support.");
+    throw Object.assign(new Error("The generation service currently has insufficient capacity for this operation. Choose a smaller operation or retry after support restores capacity. No new credits were reserved."),{code:"APPROVAL_STATE",statusCode:503});
   }
 }
 export async function verifyGenerationCost(generationId: string) {

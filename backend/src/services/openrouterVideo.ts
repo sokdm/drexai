@@ -9,8 +9,8 @@ export async function createRouterVideo(settings: any) {
     if (!record[key]?.includes(value)) throw new Error(`OpenRouter video capability not verified: ${key}=${value}`);
   }
   // Only the documented native-audio Veo adapter is exposed; generic video is not a talking-avatar API.
-  if (!["google/veo-3.1", "alibaba/wan-3.0"].includes(routerId(settings.model))) throw new Error("A native-audio-capable video adapter is required");
-  if (routerId(settings.model) === "alibaba/wan-3.0" && (record.generate_audio !== true || !record.supported_frame_images?.includes("first_frame"))) throw new Error("Native audio and first-frame input are not verified for this model");
+  if (!["google/veo-3.1", "alibaba/wan-3.0", "kwaivgi/kling-v3.0-std"].includes(routerId(settings.model))) throw new Error("A native-audio-capable video adapter is required");
+  if (["alibaba/wan-3.0","kwaivgi/kling-v3.0-std"].includes(routerId(settings.model)) && (record.generate_audio !== true || !record.supported_frame_images?.includes("first_frame"))) throw new Error("Native audio and first-frame input are not verified for this model");
   const body: any = { model: routerId(settings.model), prompt: buildVeoPrompt(settings), duration: settings.durationSeconds, resolution: String(settings.quality).toLowerCase(), aspect_ratio: settings.aspectRatio, generate_audio: true };
   if (settings.sourceImageBytes) body.frame_images = [{ type: "image_url", frame_type: "first_frame", image_url: { url: `data:${settings.sourceImageMimeType || "image/png"};base64,${settings.sourceImageBytes}` } }];
   const response = await routerResponse("videos", body, 60000), data = await response.json();
