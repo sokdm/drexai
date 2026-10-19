@@ -20,7 +20,7 @@ gatewayUsageSchema.index({ requestId: 1, kind: 1 }, { unique: true, partialFilte
 export const GatewayUsage = model("GatewayUsage", gatewayUsageSchema);
 const cache = new Map<string, { expires: number; value: any }>();
 export async function routerCatalog(kind: "text" | "image" | "video" | "voice" | "transcription") {
-  const endpoint = kind === "image" ? "images/models" : kind === "video" ? "videos/models" : "models";
+  const endpoint = kind === "image" ? "images/models" : kind === "video" ? "videos/models" : kind === "voice" ? "models?output_modalities=speech" : kind === "transcription" ? "models?output_modalities=transcription" : "models";
   const cached = cache.get(endpoint); if (cached && cached.expires > Date.now()) return cached.value.filter((m:any)=>!blockedModel(m.id)&&(kind!=="text"||Number(m.pricing?.prompt)>0||Number(m.pricing?.completion)>0));
   const response = await fetch(base + endpoint, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error("OpenRouter model discovery is unavailable. Existing direct integrations remain available.");
