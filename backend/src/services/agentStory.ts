@@ -5,7 +5,7 @@ import {AgentTask} from "../models/AgentTask.js";
 import {ScriptJob} from "../models/ScriptJob.js";
 import {AIProject} from "../models/AIProject.js";
 import {AIConversation} from "../models/AIConversation.js";
-import {scriptSettings,scriptShape} from "./scriptProduction.js";
+import {scriptSettings,scriptShape,scriptOutputBudget} from "./scriptProduction.js";
 import {assistantModel} from "./assistantRouting.js";
 import {createQuote,reserveCredits,releaseReservation} from "./wallet.js";
 import {prepareProduction} from "./productionTools.js";
@@ -16,10 +16,10 @@ export function storyArguments(message:string){
  const words=["one","two","three","four","five","six","seven","eight","nine","ten"];
  const sceneCount=count?(Number(count[1])||words.indexOf(count[1].toLowerCase())+1):3;
  const duration=message.match(/\b(\d{1,3})[ -](seconds?|minutes?)\b/i);
- return scriptSettings.parse({storyTopic:message,sceneCount:Math.min(40,Math.max(1,sceneCount)),targetDuration:duration?duration[1]+" "+duration[2]:sceneCount*30+" seconds",modelMode:"auto",type:"Video production"});
+ return scriptSettings.parse({storyTopic:message,sceneCount:Math.min(40,Math.max(1,sceneCount)),targetDuration:duration?duration[1]+" "+duration[2]:sceneCount*30+" seconds",audioMode:/\b(no narration|without narration|dialogue only|dialogue-only|only dialogue)\b/i.test(message)?"dialogue":/\b(silent|no speech|no spoken)\b/i.test(message)?"silent":/\b(narration|narrated|voiceover)\b/i.test(message)?"mixed":"auto",modelMode:"auto",type:"Video production"});
 }
 export function diagnoseAgent(stage:string,error:any,context:any={}){console.warn(JSON.stringify({event:"agent_failure",stage,taskId:context.taskId,requestId:context.requestId,code:error.code,status:error.status||error.statusCode,finishReason:error.finishReason,maxOutputTokens:error.maxOutputTokens,name:error.name}));}
-export async function storyQuote(userId:string,settings:any,quantity=scriptShape(settings).calls,usePaid=false){const model=await assistantModel("story_generation",usePaid?"paid":"auto",userId,quantity);const quote:any=await createQuote({feature:"story_generation",provider:"openrouter",model,quantity});if(!quote.allowed)throw Object.assign(new Error("Script creation is temporarily unavailable. Your credits have not been charged."),{code:"SCRIPT_QUOTE_UNAVAILABLE"});return quote;}
+export async function storyQuote(userId:string,settings:any,quantity=scriptShape(settings).calls,usePaid=false){const model=await assistantModel("story_generation",usePaid?"paid":"auto",userId,quantity);const quote:any=await createQuote({feature:"story_generation",provider:"openrouter",model,quantity,settings:{scriptOutputTokens:scriptOutputBudget(settings)}});if(!quote.allowed)throw Object.assign(new Error("Script creation is temporarily unavailable. Your credits have not been charged."),{code:"SCRIPT_QUOTE_UNAVAILABLE"});return quote;}
 export async function createStoryTask(userId:string,conversationId:string,message:string,requestId:string,productionSettings?:unknown){
  const previous=await AgentTask.findOne({userId,requestId});if(previous)return previous;
  const settings=storyArguments(message),quote=await storyQuote(userId,settings);
@@ -34,7 +34,7 @@ export async function approveStoryTask(userId:string,taskId:string,approvedCredi
  if(approvedCredits!==task.quote.credits)throw new Error("Approve the exact displayed creation cost");
  const reserve=await reserveCredits(userId,task.quote,"agent-script:"+task._id+":"+(task.scriptJobId?"resume":"start")+":"+task.quote.expiresAt,session);
  let job:any;
- if(task.scriptJobId){job=await ScriptJob.findOneAndUpdate({_id:task.scriptJobId,userId,status:"failed",inFlight:{$ne:true}},{$set:{quote:task.quote,reservationId:reserve._id,status:"queued",error:"",inFlight:false},$unset:{leaseUntil:1}},{new:true,session});if(!job)throw new Error("This request cannot be safely replayed. Saved progress is available for review.");}
+ if(task.scriptJobId){job=await ScriptJob.findOneAndUpdate({_id:task.scriptJobId,userId,status:"failed",inFlight:{$ne:true}},{$set:{quote:task.quote,"input.settings":task.input.settings,reservationId:reserve._id,status:"queued",error:"",inFlight:false},$unset:{leaseUntil:1}},{new:true,session});if(!job)throw new Error("This request cannot be safely replayed. Saved progress is available for review.");}
  else{[job]=await ScriptJob.create([{userId,requestId:randomUUID(),status:"queued",input:{settings:task.input.settings},quote:task.quote,reservationId:reserve._id,logs:[{stage:"waiting",message:"Agent creation tool approved; script worker queued.",at:new Date()}]}],{session});}
  task.scriptJobId=job._id;task.approvedAt=new Date();task.status="running";task.error=undefined;task.events.push({tool:"script_builder",status:"queued",message:"Approved script generation queued. Progress is saved after every stage.",at:new Date()});await task.save({session});
  });}finally{await session.endSession();}return AgentTask.findOne({_id:taskId,userId});
@@ -65,8 +65,9 @@ export async function continueStoryTask(userId:string,taskId:string,usePaid=fals
  if(task.stage==="production_plan"){await AgentTask.updateOne({_id:taskId,userId},{$set:{status:"running",error:""}});await advanceStoryTask(taskId);return AgentTask.findOne({_id:taskId,userId});}
  if(task.status==="rejected")throw new Error("This operation was rejected. Send a new request to change the plan.");
  if(task.status==="needs_review")throw new Error("The last provider request has an uncertain outcome. Review saved scenes before starting another paid request.");
+ task.input={...task.input,settings:{...task.input.settings,sceneBatchSize:1}};
  let calls=scriptShape(task.input.settings).calls;
- if(task.scriptJobId){const job=await ScriptJob.findOne({_id:task.scriptJobId,userId});if(job?.inFlight)throw new Error("Wait for the provider request to finish");calls=Math.max(1,Math.ceil((scriptShape(task.input.settings).scenes-(job?.cursor||0))/2)+(job?.plan?0:1));}
+ if(task.scriptJobId){const job=await ScriptJob.findOne({_id:task.scriptJobId,userId});if(job?.inFlight)throw new Error("Wait for the provider request to finish");calls=Math.max(1,Math.ceil((scriptShape(task.input.settings).scenes-(job?.cursor||0))/(task.input.settings.sceneBatchSize||2))+(job?.plan?0:1));}
  const quote=await storyQuote(userId,task.input.settings,calls,usePaid);task.quote=quote;task.status="awaiting_approval";task.error=undefined;await task.save();return task;
 }
 export function startAgentTaskWorker(){let busy=false;const tick=async()=>{if(busy)return;busy=true;try{const tasks=await AgentTask.find({status:"running",$or:[{leaseUntil:{$exists:false}},{leaseUntil:{$lt:new Date()}}]}).select("_id").limit(10);for(const task of tasks)await advanceStoryTask(String(task._id));}catch(e:any){diagnoseAgent("worker",e);}finally{busy=false;}};const timer=setInterval(()=>void tick(),3000);timer.unref();return()=>clearInterval(timer);}

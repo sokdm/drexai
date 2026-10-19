@@ -7,6 +7,7 @@ export const dialogueLineSchema = z.object({
 });
 // Optional fields keep older approved scripts readable without rewriting them.
 export const sceneAudioFields = {
+  audioMode:z.enum(["auto","dialogue","narration","mixed","silent"]).optional(),
   dialogueLines: z.array(dialogueLineSchema).max(50).optional(),
   dialogueLanguage: z.string().max(80).optional(), preferredAccent: z.string().max(150).optional(),
   emotionAndDelivery: z.string().max(500).optional(), characterActions: z.string().max(2000).optional(),
@@ -17,6 +18,7 @@ export const sceneAudioFields = {
 };
 export type DialogueLine = z.infer<typeof dialogueLineSchema>;
 export function sceneDialogue(scene: any): DialogueLine[] {
+  if(scene.audioMode==="silent"||scene.audioMode==="narration")return [];
   if (scene.dialogueLines?.length) return z.array(dialogueLineSchema).parse(scene.dialogueLines);
   return String(scene.dialogue || "").split(/\n+/).filter(s => s.trim()).map(line => {
     const match = line.match(/^([^:]{1,80}):\s*(.+)$/);
@@ -26,6 +28,7 @@ export function sceneDialogue(scene: any): DialogueLine[] {
   });
 }
 export function needsNarration(scene: any) {
+  if(scene.audioMode==="dialogue"||scene.audioMode==="silent")return false;
   return Boolean(scene.narration?.trim()) && (scene.offscreenNarration === true || (scene.offscreenNarration !== false && !sceneDialogue(scene).length));
 }
 export function segmentDialogue(lines: DialogueLine[], seconds = 8): DialogueLine[][] {

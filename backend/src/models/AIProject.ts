@@ -11,7 +11,7 @@ const sceneSchema = new Schema({
   dialogueLanguage: String, preferredAccent: String, emotionAndDelivery: String,
   characterActions: String, cameraPosition: String, cameraMovements: String,
   environmentalSounds: String, soundEffects: String, backgroundAmbience: String,
-  estimatedDurationSeconds: Number, visibleSpeakingCharacters: Boolean, offscreenNarration: Boolean,
+  audioMode:{type:String,enum:["auto","dialogue","narration","mixed","silent"]}, estimatedDurationSeconds: Number, visibleSpeakingCharacters: Boolean, offscreenNarration: Boolean,
   imagePrompt: String,
   videoMotionPrompt: String,
   cameraDirection: String,

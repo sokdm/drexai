@@ -36,7 +36,7 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
   const scenes = [...snapshot.scenes].sort((a, b) => a.order - b.order);
   if (!scenes.length || scenes.length > 50) throw new Error("Production requires 1-50 approved scenes");
   if (new Set(scenes.map(s => s.order)).size !== scenes.length) throw new Error("Scene orders must be unique");
-  if (!imageModels.some(m => m.id === settings.imageModel) || !videoModels.some(m => m.id === settings.videoModel) || !ttsModels.some(m => m.id === settings.voiceModel)) throw new Error("Unsupported production model");
+  if (!imageModels.some(m => m.id === settings.imageModel) || settings.video && !videoModels.some(m => m.id === settings.videoModel) || settings.narration && snapshot.scenes.some(needsNarration) && !ttsModels.some(m => m.id === settings.voiceModel)) throw new Error("Unsupported production model");
   const steps: StudioStep[] = [];
   function add(scene: any, kind: StudioStep["kind"], suffix: string, input: any, label: string) {
     steps.push({ key: `${scene._id}-${kind}${suffix}`, sceneId: String(scene._id), sceneOrder: scene.order, kind, input, label: `Scene ${scene.order}: ${label}`, status: "pending", credits: 0 });

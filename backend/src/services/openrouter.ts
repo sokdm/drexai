@@ -59,7 +59,7 @@ export async function recordRouterUsage(id: string, kind: string, data: any, use
   const requestId = data.id || data.generation_id, values = { model: id, kind, userId, reservationId, ...(requestId ? { requestId } : {}), usage: { ...(data.usage || {}), ...(data.choices?.[0]?.finish_reason ? { finish_reason: data.choices[0].finish_reason } : {}) }, costUsd, status: "completed" };
   if (requestId) await GatewayUsage.updateOne({ requestId, kind }, { $setOnInsert: values }, { upsert: true }); else await GatewayUsage.create(values);
 }
-type TextInput = { reasoningEffort?: "low"; timeoutMs?: number; reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { freeDeadlineMs?: number; maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any; supportsImages?:boolean }[] } };
+type TextInput = { reasoningEffort?: "low"; disableReasoning?:boolean; timeoutMs?: number; reservationId?: string; onDelta?: (text: string) => void; model: string; system: string; prompt: string; maxOutputTokens?: number; schema?: z.ZodSchema; media?: any[]; userId?: string; requestLimits?: { freeDeadlineMs?: number; maxInputTokens: number; maxOutputTokens: number; maxPrice?: any; fallbacks?: { model: string; maxPrice: any; supportsImages?:boolean }[] } };
 export async function routerText(input: TextInput) {
  const { withProvider, assertProviderBudget } = await import("./platformControl.js");
  const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(input.requestLimits?.fallbacks || []).filter(f=>!input.media?.length || f.supportsImages===true && input.media.every(m=>m.type==="image_url"))];
@@ -94,7 +94,8 @@ async function routerTextAttempt(input: TextInput) {
   if (supported.includes("max_tokens")) body.max_tokens = Math.min(input.maxOutputTokens ?? 5000, limits.maxOutputTokens);
   const modelOutputLimit = Number(record.top_provider?.max_completion_tokens ?? record.max_completion_tokens);
   if (Number.isFinite(modelOutputLimit) && modelOutputLimit > 0) body.max_tokens = Math.min(body.max_tokens, Math.floor(modelOutputLimit));
-  if (input.reasoningEffort && supported.includes("reasoning")) body.reasoning = { effort: input.reasoningEffort };
+  if(input.disableReasoning && supported.includes("reasoning") && record.reasoning?.mandatory!==true)body.reasoning={enabled:false};
+  else if (input.reasoningEffort && supported.includes("reasoning")) body.reasoning = { effort: input.reasoningEffort };
   if (input.schema) body.response_format = nativeSchema ? { type: "json_schema", json_schema: { name: "drex_result", strict: false, schema: jsonSchema } } : {type:"json_object"};
   const { verifiedFreeText, admitFreeAi } = await import("./freeAiLimits.js");
   if (verifiedFreeText(record)) {

@@ -8,7 +8,7 @@ import { signedImageUrl } from "../services/mediaStorage.js";
 import { defaultModel } from "../services/platformControl.js";
 import { createQuote, reserveCredits, releaseReservation } from "../services/wallet.js";
 import { rememberQuote, approvedTerms } from "../services/managedPricing.js";
-import { scriptSettings, scriptShape } from "../services/scriptProduction.js";
+import { scriptSettings, scriptShape, scriptOutputBudget } from "../services/scriptProduction.js";
 import { env } from "../config/env.js";
 import { AIConversation } from "../models/AIConversation.js";
 export const scriptsRouter = Router();
@@ -36,7 +36,7 @@ export async function scriptToolTerms(input: any, userId?: string) {
 
  const model = await (await import("../services/assistantRouting.js")).assistantModel("story_generation", input.settings.modelMode, userId, scriptShape(input.settings).calls);
  if (!model.startsWith("openrouter/")) throw new Error("Select an OpenRouter model for Story generation in Admin / Providers. Script Builder no longer submits direct-provider requests.");
- return createQuote({ feature: "story_generation", provider: "openrouter", model, quantity: scriptShape(input.settings).calls });
+ return createQuote({ feature: "story_generation", provider: "openrouter", model, quantity: scriptShape(input.settings).calls,settings:{scriptOutputTokens:scriptOutputBudget(input.settings)} });
 }
 scriptsRouter.post("/scripts/quote", wrap(async (req: any, res: any) => { const input = await normalize(req.user._id, inputSchema.parse(req.body)); try{res.json({ quote: await rememberQuote(req.user._id, input, await scriptToolTerms(input, String(req.user._id))), stages: scriptShape(input.settings) });}catch(e:any){if(input.projectId&&input.message)return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});throw e;} }));
 scriptsRouter.post("/scripts/generate", wrap(async (req: any, res: any) => {

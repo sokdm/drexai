@@ -104,3 +104,9 @@ test("free script timeouts release the reservation while preserving saved scenes
  const saved=await ScriptJob.findById(j._id);assert.equal(saved.status,"failed");assert.match(saved.error,/released/);
  const {CreditReservation}=await import("../dist/models/CreditReservation.js");assert.equal((await CreditReservation.findById(j.reservationId)).status,"released");
 });
+
+test('single-scene requests checkpoint separately and disable optional reasoning',async()=>{
+ const j=await job({input:{settings:{...settings,sceneCount:3,targetDuration:'20 seconds',sceneBatchSize:1,audioMode:'dialogue'}}});let calls=[];
+ await processScriptJob(j,async input=>{assert.equal(input.disableReasoning,true);const data=JSON.parse(input.prompt);if(data.sceneCount)return JSON.stringify({title:'Two explorers',storyConcept:'Discovery',summary:'Dialogue story',characters:[],scenes:[1,2,3].map(n=>({title:'Scene '+n,purpose:'Discover',duration:7}))});calls.push(data.startOrder);assert.equal(data.requiredSceneKeys.length,1);return JSON.stringify({[data.requiredSceneKeys[0]]:{...scene(data.startOrder),narration:'Provider mistakenly added narration',dialogue:'Explorer: We found the island and can finally explore what lies beyond the distant horizon.'}});});
+ const saved=await ScriptJob.findById(j._id);assert.equal(saved.status,'completed');assert.deepEqual(calls,[1,2,3]);const p=await AIProject.findById(saved.projectId);assert.ok(p.scenes.every(s=>s.narration===''&&s.offscreenNarration===false&&s.audioMode==='dialogue'));
+});

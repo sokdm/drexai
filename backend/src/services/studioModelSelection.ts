@@ -1,3 +1,4 @@
+import {needsNarration} from './sceneAudio.js';
 import {imageModels} from './imageGeneration.js';
 import {videoModels} from './videoGeneration.js';
 import {ttsModels} from './textToSpeech.js';
@@ -6,7 +7,8 @@ import {buildStudioSteps,studioSettingsSchema} from './studioPlan.js';
 import {priceStudioSteps} from './studioPricing.js';
 export async function affordableStudioSettings(snapshot:any,input:any){
  // MongoDB can omit empty objects in older Mixed settings. Restore validated defaults.
- let settings=studioSettingsSchema.parse(input);const selections:any[]=[];
+ let settings=studioSettingsSchema.parse(input);
+ if(!snapshot.scenes.some((scene:any)=>needsNarration(scene)))settings.narration=false;const selections:any[]=[];
  for(const [kind,key,models] of [['image','imageModel',imageModels],['video','videoModel',videoModels],['voice','voiceModel',ttsModels]] as const){
   if(kind==='video'&&!settings.video||kind==='voice'&&!settings.narration)continue;
   const candidates=(await configuredModels(kind,models as any)).filter((m:any)=>m.id.startsWith('openrouter/')&&!/google\/|gemini|veo/i.test(m.id));

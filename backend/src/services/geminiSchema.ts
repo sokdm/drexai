@@ -4,7 +4,7 @@ import { z } from "zod";
 export function geminiSchema(schema: z.ZodTypeAny): Record<string, any> {
   if (schema instanceof z.ZodEffects) return geminiSchema(schema.innerType());
   if (schema instanceof z.ZodOptional || schema instanceof z.ZodDefault) return geminiSchema(schema._def.innerType);
-  if (schema instanceof z.ZodString) return { type: "string" };
+  if (schema instanceof z.ZodString) return { type: "string", ...(schema.minLength!=null?{minLength:schema.minLength}:{}), ...(schema.maxLength!=null?{maxLength:schema.maxLength}:{}) };
   if (schema instanceof z.ZodNumber) return { type: schema.isInt ? "integer" : "number" };
   if (schema instanceof z.ZodBoolean) return { type: "boolean" };
   if (schema instanceof z.ZodEnum) return { type: "string", enum: schema.options };

@@ -13,7 +13,7 @@ for(const width of [390,1440])test(`script builder editing and quote approval at
  else if(path.endsWith("/scenes")){saves++;project={...project,...req.postDataJSON()};data={project};}
  else if(path===`/api/ai/projects/${id}`)data={project};
  else if(path==="/api/ai/scripts/quote")data={quote:{allowed:true,credits:9}};
- else if(path==="/api/ai/scripts/generate"){generated++;data={job:{_id:"c11111111111111111111111",status:"queued",logs:[]}};}
+ else if(path==="/api/ai/scripts/generate"){expect(req.postDataJSON().settings.audioMode).toBe("dialogue");generated++;data={job:{_id:"c11111111111111111111111",status:"queued",logs:[]}};}
  else if(path.includes("/scripts/jobs/"))data={job:{status:"completed",logs:[...Array.from({length:30},(_,i)=>({stage:"writing",message:`Saved scene ${i+1}. A long detailed production activity message that must wrap inside the panel without overlapping its footer.`,at:new Date().toISOString()})),{stage:"saving",message:"Script saved",at:new Date().toISOString()}]},project};
  return route.fulfill({json:data});});
  await page.setViewportSize({width,height:1000});await page.goto(`/dashboard/script-builder?projectId=${id}`);
@@ -22,7 +22,7 @@ for(const width of [390,1440])test(`script builder editing and quote approval at
  await page.getByRole("button",{name:"Dialogue",exact:true}).click();await page.getByLabel("Scene 1 Dialogue",{exact:true}).fill("Explorer: We found it.");
  await page.getByRole("button",{name:"Save draft",exact:true}).click();await expect.poll(()=>saves).toBe(1);expect(project.scenes[0].dialogue).toBe("Explorer: We found it.");
  await page.getByRole("button",{name:"Prompts",exact:true}).click();await expect(page.getByLabel("Scene 1 Image prompt",{exact:true})).toBeVisible();
- await page.getByRole("button",{name:"Generate Script",exact:true}).click();await expect(page.getByRole("button",{name:"Confirm 9 credits",exact:true})).toBeVisible();expect(generated).toBe(0);
+ await page.getByLabel("Script audio style",{exact:true}).selectOption("dialogue");await page.getByRole("button",{name:"Generate Script",exact:true}).click();await expect(page.getByRole("button",{name:"Confirm 9 credits",exact:true})).toBeVisible();expect(generated).toBe(0);
  await page.getByRole("button",{name:"Confirm 9 credits",exact:true}).click();await expect.poll(()=>generated).toBe(1);await expect(page.getByText("Script saved",{exact:true})).toBeVisible();
  const feed = page.getByRole("log", {name:"Generation activity messages"});
  await expect.poll(()=>feed.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop)).toBeLessThan(3);
