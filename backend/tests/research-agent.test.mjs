@@ -164,3 +164,11 @@ test("a failed final summary preserves completed tool evidence and does not char
  const conversation=await AIConversation.findOne({userId:user._id}).sort({createdAt:-1});assert.ok(conversation.messages.some(m=>m.metadata?.toolResult?.tool.name==='inspect_production'));assert.equal(conversation.messages.at(-1).metadata.incomplete,true);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);
  }finally{plannedTools=[];rejectSummary=false;}
 });
+
+test('review approval persists across Script Builder to Studio and rejects unreviewed continuation',async()=>{
+ const project=await AIProject.create({userId:user._id,title:'Reviewed island',scenes:[{order:1,title:'Arrival',narration:'An explorer arrives.',imagePrompt:'An island',videoMotionPrompt:'Approach',approved:false}]});
+ const path=base+'/projects/'+project._id;
+ let response=await original(path+'/continue-ai-studio',{method:'POST',headers,body:'{}'});assert.equal(response.status,409);
+ response=await original(path+'/approve',{method:'POST',headers,body:'{}'});assert.equal(response.status,200);const approved=(await response.json()).project;assert.ok(approved.approvedAt);assert.ok(approved.scenes.every(s=>s.approved));
+ response=await original(path+'/continue-ai-studio',{method:'POST',headers,body:'{}'});assert.equal(response.status,200);const saved=await AIProject.findById(project._id);assert.ok(saved.approvedAt);assert.ok(saved.aiStudioReadyAt);
+});

@@ -44,7 +44,7 @@ export function AIStudioPage() {
   const [previewAssetId, setPreviewAssetId] = useState("");
   const [connected, setConnected] = useState(false);
   const productionId = params.get("productionId");
-  const activeRequest = useRef(0),requotedLegacy=useRef("");
+  const activeRequest = useRef(0),requotedLegacy=useRef(""),reviewedPlan=useRef("");
   const activityFeed = useRef<HTMLDivElement>(null);
   useEffect(() => { const node = activityFeed.current; if (node) node.scrollTop = node.scrollHeight; }, [events.length]);
   const refresh = useCallback(async () => {
@@ -106,7 +106,8 @@ export function AIStudioPage() {
   useEffect(() => { const timer = setInterval(() => setUrls({}), 45 * 60000); return () => clearInterval(timer); }, [productionId]);
 
   const project = config?.projects.find((item: any) => item._id === projectId);
-  useEffect(() => { if (!productionId && project?.prompts?.sourceSettings?.product) { const seconds = Number(String(project.targetDuration).match(/[\d.]+/)?.[0]);if (Number.isFinite(seconds) && seconds >= 4) setSettings(old => ({ ...old,targetSeconds:Math.min(3600, /second/i.test(project.targetDuration) ? seconds : seconds * 60) })); } }, [project?._id,productionId]);
+  useEffect(() => { if (!productionId && project?._id) { const seconds = Number(String(project.targetDuration).match(/[\d.]+/)?.[0]);if (Number.isFinite(seconds) && seconds >= 4) setSettings(old => ({ ...old,targetSeconds:Math.min(3600, /second/i.test(project.targetDuration) ? seconds : seconds * 60) })); } }, [project?._id,productionId]);
+  useEffect(()=>{if(params.get('reviewed')!=='1'||!config||!project?.approvedAt||productionId||reviewedPlan.current===projectId)return;reviewedPlan.current=projectId;void act(async()=>{const result=await api<any>('/api/studio/plans',{method:'POST',body:JSON.stringify({projectId,settings:{...settings,targetSeconds:Math.max(4,Math.min(3600,(Number(String(project.targetDuration).match(/[\d.]+/)?.[0])||settings.targetSeconds)*(/second/i.test(project.targetDuration)?1:60))),agentSelectModels:true}})});setParams({projectId,productionId:result.production._id});});},[config,projectId,project?.approvedAt,productionId]);
   const scenes = production?.snapshot.scenes ?? project?.scenes ?? [];
   const sortedScenes = [...scenes].sort((a, b) => a.order - b.order);
   const scene = sortedScenes.find((s: any) => String(s._id) === sceneId) ?? sortedScenes[0];

@@ -148,7 +148,7 @@ aiRouter.patch("/projects/:id/scenes", async (req, res) => {
 });
 
 aiRouter.post("/projects/:id/approve", async (req, res) => res.json({ project: await AIProject.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, { approvedAt: new Date(), "scenes.$[].approved": true }, { new: true }) }));
-aiRouter.post("/projects/:id/continue-ai-studio", async (req, res) => res.json({ project: await AIProject.findOneAndUpdate({ _id: req.params.id, userId: req.user._id }, { aiStudioReadyAt: new Date() }, { new: true }) }));
+aiRouter.post("/projects/:id/continue-ai-studio", async (req, res) => { const project=await AIProject.findOne({_id:req.params.id,userId:req.user._id});if(!project)return res.status(404).json({error:"Project not found"});if(!project.approvedAt||!project.scenes.length||project.scenes.some(s=>!s.approved)||(project.prompts as any)?.partial)return res.status(409).json({error:"Review and approve the completed script before continuing."});project.aiStudioReadyAt=new Date();await project.save();res.json({project}); });
 
 aiRouter.get("/characters", async (req, res) => res.json({ characters: await CharacterProfile.find({ userId: req.user._id }).sort({ updatedAt: -1 }) }));
 aiRouter.post("/characters", async (req, res) => res.status(201).json({ character: await CharacterProfile.create({ ...req.body, userId: req.user._id }) }));

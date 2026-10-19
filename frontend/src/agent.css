@@ -9,3 +9,8 @@
 .studio-coordinator{border-top:1px solid #334155;margin-top:16px;padding-top:14px}.studio-coordinator h3{font-size:13px;font-weight:700}.studio-coordinator>p{font-size:11px;line-height:1.6;margin:8px 0}.studio-coordinator textarea{width:100%;border:1px solid #475569;padding:9px;border-radius:7px;background:#172437;color:#e2e8f0;font-size:12px;margin:10px 0}.studio-coordinator>button,.studio-coordinator>a{display:block;font-size:11px;padding:8px 12px;border:1px solid #475569;border-radius:6px;margin-top:8px}.studio-asset-library{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.studio-asset-library h3{grid-column:1/-1;font-size:12px;font-weight:700}.studio-asset-library button{border:1px solid #334155;border-radius:6px;overflow:hidden;text-align:left}.studio-asset-library img,.studio-asset-library video{width:100%;height:65px;object-fit:cover}.studio-asset-library span{display:block;font-size:10px;padding:6px}
 
 .agent-mobile-history{display:none}@media(max-width:800px){.agent-mobile-history{display:block;width:135px;max-width:36vw;background:#213650;border:1px solid #475569;border-radius:6px;padding:7px;color:#e2e8f0;font-size:11px}}
+/* Saved-project cards must keep readable text in narrow assistant panels. */
+.agent-feed .agent-project{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;padding:14px;min-width:0;align-items:start}
+.agent-feed .agent-project>div{min-width:0;overflow-wrap:break-word;word-break:normal}
+.agent-feed .agent-project strong,.agent-feed .agent-project p{display:block;line-height:1.5;margin:0 0 6px}
+.agent-feed .agent-project a{grid-column:2;justify-self:start;white-space:normal;line-height:1.5}

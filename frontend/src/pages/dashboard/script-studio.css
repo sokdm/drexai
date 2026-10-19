@@ -24,3 +24,16 @@
 @media(max-width:680px){.script-sidebar{height:auto;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(240px,auto) 320px;overflow:visible}.script-assistant{max-height:400px}.script-log{min-height:0;max-height:none}}
 
 .script-duration-note{padding:10px;border:1px solid #bb943b66;border-radius:7px;background:#b98a1910;color:var(--ss-text);font-size:11px;line-height:1.6;margin:12px 0}
+/* Structured scene results, with one document scroller rather than tiny nested fields. */
+.script-studio .script-document-scroll{display:flex;flex-direction:column;gap:14px;overflow-x:hidden}
+.script-studio .script-scene{border:1px solid var(--ss-line);border-radius:10px;padding:14px;background:var(--ss-input);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.script-studio .script-scene.active{border-color:#8276ff}
+.script-studio .script-scene>header,.script-studio .script-scene>footer,.script-studio .script-scene-visual{grid-column:1/-1}
+.script-studio .script-scene>header{display:grid;grid-template-columns:auto minmax(0,1fr) 70px;gap:10px;align-items:center;margin:0}
+.script-studio .script-scene>label{min-width:0;margin:0;line-height:1.6}
+.script-studio .script-scene>label:first-of-type{grid-column:1/-1}
+.script-studio .script-document textarea{field-sizing:content;min-height:80px;max-height:none;overflow:auto;resize:vertical;line-height:1.65;font-weight:400}
+.script-studio .script-scene>footer{padding-top:10px;border-top:1px solid var(--ss-line)}
+.script-studio .script-title{margin:0}.script-studio .script-title input{font-size:22px;line-height:1.35}
+.script-studio .script-badges{margin:0}.script-studio .script-tabs{flex-wrap:wrap;flex-shrink:0}
+@media(max-width:900px){.script-studio .script-scene{grid-template-columns:minmax(0,1fr)}.script-studio .script-scene>header{grid-template-columns:minmax(0,1fr) 65px}.script-studio .script-scene>header h3{grid-column:1/-1}}
