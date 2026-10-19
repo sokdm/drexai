@@ -24,7 +24,7 @@ async function quoteFor(settings: z.infer<typeof settingsSchema>) {
   if (!transcription.allowed) return transcription;
   return { ...base, provider: "openrouter", credits: base.credits + transcription.credits, estimatedCostUsd: (base.estimatedCostUsd || 0) + (transcription.estimatedCostUsd || 0), transcription, note: "Includes full-source transcription for the approved source duration rounded up to the next minute." };
 }
-creativeRouter.get("/config", wrap(async (req: any, res: any) => res.json({ storageConfigured: persistentStorageConfigured(), analysisConfigured: !!(env.GEMINI_API_KEY || env.OPENROUTER_API_KEY), workerOnline: !!await RenderWorker.exists({ _id: "creative", expiresAt: { $gt: new Date() } }), maxSourceBytes: 1024 * 1024 * 1024, maxDuration: 3600 })));
+creativeRouter.get("/config", wrap(async (req: any, res: any) => res.json({ storageConfigured: persistentStorageConfigured(), analysisConfigured: !!(env.OPENROUTER_API_KEY), workerOnline: !!await RenderWorker.exists({ _id: "creative", expiresAt: { $gt: new Date() } }), maxSourceBytes: 1024 * 1024 * 1024, maxDuration: 3600 })));
 creativeRouter.get("/jobs", wrap(async (req: any, res: any) => res.json({ jobs: await CreativeJob.find({ userId: req.user._id, kind: "shorts" }).select("-quote -leaseToken -sourceKey -options.voiceId").sort({ createdAt: -1 }).limit(50) })));
 creativeRouter.post("/quote", wrap(async (req: any, res: any) => { const settings = settingsSchema.parse(req.body); res.json({ quote: await rememberQuote(req.user._id, settings, await quoteFor(settings)) }); }));
 creativeRouter.post("/jobs", wrap(async (req: any, res: any) => {
@@ -32,7 +32,7 @@ creativeRouter.post("/jobs", wrap(async (req: any, res: any) => {
   await checkGenerationUser(String(req.user._id));
   if (!persistentStorageConfigured() || !await RenderWorker.exists({ _id: "creative", expiresAt: { $gt: new Date() } })) return res.status(503).json({ error: "Configure storage and start the creative worker before submitting" });
   if (await CreativeJob.countDocuments({ userId: req.user._id, status: { $in: ["uploading", "queued", "processing", "provider_pending"] } }) >= 2) return res.status(429).json({ error: "Finish or cancel an existing creative job first" });
-  if (!env.GEMINI_API_KEY && !env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Configure the AI gateway for video analysis" });
+  if (!env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Configure the AI gateway for video analysis" });
   const quote = await approvedTerms(req.user._id, settings, approvedCredits, () => quoteFor(settings));
   if (!quote.allowed || quote.credits !== approvedCredits) throw new Error("Review and approve the current quote first");
   const reservation = await reserveCredits(String(req.user._id), quote, "creative:" + randomUUID());

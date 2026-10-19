@@ -54,7 +54,7 @@ export const scriptProjectSchema = z.object({
 });
 
 export function assertGeminiReady() {
-  if (!env.GEMINI_API_KEY && !env.OPENROUTER_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+  if (!env.OPENROUTER_API_KEY) throw new Error("The AI gateway is not configured");
 }
 
 export async function geminiJson<T>(input: {

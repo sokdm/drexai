@@ -28,7 +28,7 @@ export type StudioStep = {
   key: string; sceneId: string; sceneOrder: number; kind: "image" | "audio" | "video";
   label: string; input: Record<string, any>; status: "pending" | "requesting" | "completed" | "skipped" | "failed" | "needs_review";
   credits: number; pricing?: Record<string, any>; assetId?: string; providerJobId?: string;
-  stored?: Record<string, any>; error?: string; charged?: boolean; reused?: boolean; failedProviderJobIds?: string[];
+  executionModel?:string;stored?: Record<string, any>; error?: string; charged?: boolean; reused?: boolean; failedProviderJobIds?: string[];
 };
 export type StudioSnapshot = { title: string; scenes: any[]; characters: any[]; niche?: any; summary?: string; product?: { name: string; benefits: string; assetIds: string[] } };
 
@@ -55,7 +55,7 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
     if (segments.length > 50) throw new Error("A scene supports up to 50 speech segments");
     segments.forEach((segment, index) => {
       const character = snapshot.characters.find(c => c.name === segment.speaker);
-      const voiceId = settings.characterVoices[segment.speaker] ?? character?.voicePreference ?? settings.voiceId;
+      const voiceId = settings.characterVoices?.[segment.speaker] ?? character?.voicePreference ?? settings.voiceId;
       const input = validateTtsSettings({ ...segment, model: settings.voiceModel, voiceId, language: settings.language, style: settings.style, mode: "single", speakers: [] });
       if (input.text.length > 8000) throw new Error("Split speech segments longer than 8,000 characters before production");
       add(scene, "audio", `-${index}`, input, `${segment.track} (${segment.speaker})`);

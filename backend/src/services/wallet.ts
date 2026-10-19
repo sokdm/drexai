@@ -1,3 +1,4 @@
+import {blockedModel,assertAllowedModel} from "./modelPolicy.js";
 import { AppMigration, DailySpendBudget } from "../models/Finance.js";
 import { AdminAudit } from "../models/Admin.js";
 import { isOpenRouter, GatewayUsage } from "./openrouter.js";
@@ -62,6 +63,7 @@ export async function creditPurchase({ userId, credits, idempotencyKey, metadata
 }
 
 export async function createQuote(input: any) {
+  if(blockedModel(input.model))return {allowed:false,credits:0,feature:input.feature,model:input.model,reason:"This retired route is disabled. Prepare operation approvals to choose an available model."};
   if (isOpenRouter(input.model)) { try { return await (await import("./creditPricingEngine.js")).quoteAutomaticCredits(input); } catch (error: any) { return { allowed: false, credits: 0, reason: error.message, feature: input.feature, provider: input.provider, model: input.model }; } }
   const rule = await GenerationPriceRule.findOne({ feature: input.feature, provider: input.provider, model: input.model, active: true, ...(input.unit ? { unit: input.unit } : {}), ...(input.ruleId ? { _id: input.ruleId } : {}) });
   if (isOpenRouter(input.model) && (!rule || !(rule.providerCostUsd > 0))) return { allowed: false, credits: 0, reason: "Configure verified OpenRouter provider pricing before generating." };
@@ -72,6 +74,7 @@ export async function createQuote(input: any) {
 }
 
 export async function reserveCredits(userId: string, quote: any, idempotencyKey: string, outerSession?: mongoose.ClientSession): Promise<any> {
+  if(quote.model)assertAllowedModel(quote.model);
   const prior = await CreditReservation.findOne({ idempotencyKey }).session(outerSession ?? null);
   if (prior) { if (String(prior.userId) !== userId) throw new Error("Reservation ownership mismatch"); return prior; }
   await checkGenerationUser(userId);

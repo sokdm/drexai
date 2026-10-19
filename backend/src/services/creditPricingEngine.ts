@@ -84,7 +84,7 @@ export async function estimateRouterCost(input: any, policy: any) {
     if (rates[key] === undefined) throw new Error("Verify the selected resolution and native-audio video pricing before use");
     return { cost: new Decimal(rates[key]).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits };
   }
-  if(kind==="voice"&&input.model==="openrouter/elevenlabs/eleven-flash-v2.5"){
+  if(kind==="voice"&&["openrouter/elevenlabs/eleven-flash-v2.5","openrouter/elevenlabs/eleven-turbo-v2"].includes(input.model)){
     const record=await verifiedRouterModel(input.model,"voice");
     if(!record.supported_voices?.includes(settings.voiceId))throw new Error("Select a supported voice before calculating narration pricing");
     const rate=new Decimal(published.pricing.prompt||0);

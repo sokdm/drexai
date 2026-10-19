@@ -1,3 +1,4 @@
+import {blockedModel,assertAllowedModel} from "./modelPolicy.js";
 import { readProviderStream } from "./providerStream.js";
 import { env } from "../config/env.js";
 import mongoose, { Schema, model } from "mongoose";
@@ -20,16 +21,16 @@ export const GatewayUsage = model("GatewayUsage", gatewayUsageSchema);
 const cache = new Map<string, { expires: number; value: any }>();
 export async function routerCatalog(kind: "text" | "image" | "video" | "voice" | "transcription") {
   const endpoint = kind === "image" ? "images/models" : kind === "video" ? "videos/models" : "models";
-  const cached = cache.get(endpoint); if (cached && cached.expires > Date.now()) return cached.value;
+  const cached = cache.get(endpoint); if (cached && cached.expires > Date.now()) return cached.value.filter((m:any)=>!blockedModel(m.id));
   const response = await fetch(base + endpoint, { signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error("OpenRouter model discovery is unavailable. Existing direct integrations remain available.");
   const data = await response.json(); if (!Array.isArray(data.data)) throw new Error("Invalid OpenRouter catalog");
-  cache.set(endpoint, { expires: Date.now() + 300000, value: data.data }); return data.data;
+  cache.set(endpoint, { expires: Date.now() + 300000, value: data.data }); return data.data.filter((m:any)=>!blockedModel(m.id));
 }
 export async function verifiedRouterModel(id: string, kind: "text" | "image" | "video" | "voice" | "transcription") {
   const models = await routerCatalog(kind), record = models.find((m: any) => m.id === routerId(id));
   const modality = kind === "voice" ? "speech" : kind;
-  if (!record || (kind !== "video" && !record.architecture?.output_modalities?.includes(modality))) throw new Error(`OpenRouter model is not verified for ${kind}`);
+  if (!record || (kind !== "video" && !record.architecture?.output_modalities?.includes(modality))) throw Object.assign(new Error(`OpenRouter model is not verified for ${kind}`),{providerRejected:true,status:404});
   return record;
 }
 export function checkCapability(record: any, key: string, value: any) {
@@ -37,6 +38,7 @@ export function checkCapability(record: any, key: string, value: any) {
   if (!descriptor || descriptor.type === "enum" && !descriptor.values?.includes(value) || descriptor.type === "range" && (!Number.isInteger(value) || value < descriptor.min || value > descriptor.max)) throw new Error(`OpenRouter model does not support ${key}=${value}`);
 }
 export async function routerResponse(endpoint: string, body?: any, timeout = 180000) {
+  if(body?.model)assertAllowedModel(body.model);
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured on this service");
   if (!/^(chat\/completions|images|audio\/(?:speech|transcriptions)|videos(?:\/[\w-]+(?:\/content\?index=0)?)?)$/.test(endpoint)) throw new Error("Invalid OpenRouter endpoint");
   const response = await fetch(base + endpoint, { method: body ? "POST" : "GET", redirect: "error", headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(timeout) });
@@ -63,9 +65,10 @@ export async function routerText(input: TextInput) {
  const candidates = [{ model: input.model, maxPrice: input.requestLimits?.maxPrice }, ...(input.requestLimits?.fallbacks || []).filter(f=>!input.media?.length || f.supportsImages===true && input.media.every(m=>m.type==="image_url"))];
  for (let index = 0; index < candidates.length; index++) {
   const candidate = candidates[index];
-  const free = input.requestLimits?.freeDeadlineMs ? (await import("./freeAiLimits.js")).verifiedFreeText(await verifiedRouterModel(candidate.model,"text")) : false;
-  let emitted=false;
+  if(blockedModel(candidate.model))continue;
+  let free=false,emitted=false;
   try {
+   free=input.requestLimits?.freeDeadlineMs ? (await import("./freeAiLimits.js")).verifiedFreeText(await verifiedRouterModel(candidate.model,"text")) : false;
    if (index) await assertProviderBudget(candidate.model, (input.requestLimits as any)?.approvedCostUsd);
    return await withProvider(candidate.model, () => routerTextAttempt({ ...input, timeoutMs: free ? input.requestLimits!.freeDeadlineMs : input.timeoutMs, ...(input.onDelta ? {onDelta:(text:string)=>{if(text)emitted=true;input.onDelta!(text);}} : {}), model: candidate.model, requestLimits: input.requestLimits ? { ...input.requestLimits, maxPrice: candidate.maxPrice } : undefined }));
   } catch (error: any) {
@@ -134,8 +137,8 @@ export async function routerImages(settings: any) {
 export async function routerSpeech(settings: any) {
   await verifiedRouterModel(settings.model, "voice");
   // Only adapters with a documented voice roster are accepted.
-  if (!/^google\/gemini-3\.8-flash(?:-lite)?-tts$/.test(routerId(settings.model)) && routerId(settings.model)!=="elevenlabs/eleven-flash-v2.5") throw new Error("This speech model does not have a verified voice configuration");
-  if(routerId(settings.model)==="elevenlabs/eleven-flash-v2.5"){const record=await verifiedRouterModel(settings.model,"voice");if(!record.supported_voices?.includes(settings.voiceId)||settings.mode==="multi")throw new Error("Unsupported voice or multi-speaker setting for the selected speech model");}
+  if (!/^google\/gemini-3\.8-flash(?:-lite)?-tts$/.test(routerId(settings.model)) && !["elevenlabs/eleven-flash-v2.5","elevenlabs/eleven-turbo-v2"].includes(routerId(settings.model))) throw new Error("This speech model does not have a verified voice configuration");
+  if(routerId(settings.model).startsWith("elevenlabs/")){const record=await verifiedRouterModel(settings.model,"voice");if(!record.supported_voices?.includes(settings.voiceId)||settings.mode==="multi")throw new Error("Unsupported voice or multi-speaker setting for the selected speech model");}
   const input = settings.mode === "multi" ? settings.speakers.map((s: any) => ({ text: s.text, voice: s.voice, instructions: s.style || settings.style })) : settings.text;
   const response = await routerResponse("audio/speech", { model: routerId(settings.model), input, voice: settings.voiceId, ...(routerId(settings.model).startsWith("google/")?{instructions: `${settings.style || "natural"}. Language: ${settings.language}`} : {}), response_format: "mp3" });
   const bytes = Buffer.from(await response.arrayBuffer()), directory = await mkdtemp(path.join(tmpdir(), "drex-router-speech-"));

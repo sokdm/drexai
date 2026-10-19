@@ -9,12 +9,13 @@ const directTtsModels = [
 
 const routerTtsModels = directTtsModels.map(m => ({ ...m, id: "openrouter/google/" + m.id, label: m.label + " via OpenRouter" }));
 routerTtsModels.unshift({id:"openrouter/elevenlabs/eleven-flash-v2.5",label:"ElevenLabs Flash v2.5 via OpenRouter",multiSpeaker:false,voices:["george","sarah","adam","alice","bella","bill","brian","callum","charlie","chris","daniel","eric","harry","jessica","laura","liam","lily","matilda","river","roger","will"],styles:[],languages:["English","Spanish","French","Portuguese","Hindi","Arabic","German","Italian","Japanese","Korean","Chinese","Dutch","Polish","Turkish"]});
+routerTtsModels.unshift({...routerTtsModels[0],id:"openrouter/elevenlabs/eleven-turbo-v2",label:"ElevenLabs Turbo v2 via OpenRouter",languages:["English"]});
 export const ttsModels = env.OPENROUTER_API_KEY ? [...routerTtsModels, ...directTtsModels] : [...directTtsModels, ...routerTtsModels];
 
 export function validateTtsSettings(input: any) {
   const model = ttsModels.find((item) => item.id === input.model);
   if (!model) throw new Error("Unsupported speech model");
-  if(model.id==="openrouter/elevenlabs/eleven-flash-v2.5"&&String(input.text||"").length>40000)throw new Error("Split narration into sections of at most 40,000 characters");
+  if(model.id.startsWith("openrouter/elevenlabs/")&&String(input.text||"").length>(model.id.endsWith("eleven-turbo-v2")?30000:40000))throw new Error("Split narration into sections of at most 40,000 characters");
   if (!model.voices.includes(input.voiceId)) throw new Error("Unsupported voice for selected model");
   if (!model.languages.includes(input.language)) throw new Error("Unsupported language for selected model");
   if (input.mode === "multi" && !model.multiSpeaker) throw new Error("Selected model does not support multi-speaker dialogue");

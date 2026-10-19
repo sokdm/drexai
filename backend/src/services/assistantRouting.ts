@@ -1,3 +1,4 @@
+import {safeTextModel} from "./modelPolicy.js";
 import { defaultModel, assertProviderBudget } from "./platformControl.js";
 import { routerCatalog } from "./openrouter.js";
 import { verifiedFreeText } from "./freeAiLimits.js";
@@ -8,10 +9,10 @@ export async function assistantModel(feature: string, mode = "configured", userI
  if(mode === "auto") {
   const {freeAiAvailable}=await import("./freeAiLimits.js");
   if(userId && await freeAiAvailable(userId,requests))try{return await assistantModel(feature,"free");}catch{}
-  return "openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL;
+  return safeTextModel("openrouter/"+env.OPENROUTER_TEXT_FALLBACK_MODEL);
  }
  const configured = await defaultModel(feature, await defaultModel("text", "openrouter/" + env.OPENROUTER_TEXT_MODEL));
- if (mode === "paid") return "openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL;
+ if (mode === "paid") return safeTextModel("openrouter/" + env.OPENROUTER_TEXT_FALLBACK_MODEL);
  if (mode !== "free") return configured;
  const { values } = await getPricingPolicy();
  const candidates = (await routerCatalog("text")).filter((r: any) => verifiedFreeText(r) && r.architecture?.output_modalities?.includes("text") && r.supported_parameters?.includes("response_format") && r.supported_parameters?.includes("max_tokens") && r.context_length >= values.maxInputTokens + values.maxOutputTokens);

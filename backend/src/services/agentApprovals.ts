@@ -19,6 +19,13 @@ export function publicApproval(a:any){return {_id:a._id,productionId:a.productio
 export async function ensureProductionApprovals(userId:string,productionId:string,conversationId?:string){
  const p=await StudioProduction.findOne({_id:productionId,userId});if(!p)fail('Production not found',404);
  if(conversationId&&!await AIConversation.exists({_id:conversationId,userId}))fail('Conversation not found',404);
+ if(p!.status==='draft'&&!p!.approvedAt&&p!.steps.some((s:any)=>/gemini|google\/|^veo-/i.test(s.input.model))){
+ const {affordableStudioSettings}=await import('./studioModelSelection.js');const {buildStudioSteps}=await import('./studioPlan.js');const {priceStudioSteps}=await import('./studioPricing.js');
+ const chosen=await affordableStudioSettings(p!.snapshot,{...p!.settings,agentSelectModels:true}),steps=buildStudioSteps(p!.snapshot,chosen.settings);for(const step of steps){const options=chosen.selections.find(s=>s.kind===(step.kind==='audio'?'voice':step.kind))?.alternatives||[];step.input.approvedAlternatives=options.flatMap((o:any)=>o.steps.filter((s:any)=>s.key===step.key).map((s:any)=>({input:s.input,credits:s.credits,providerCostUsd:s.pricing?.providerCostUsd})));}const estimate:any=await priceStudioSteps(steps);
+ if(p!.settings.autoExport){estimate.renderCredits=p!.estimate.renderCredits||0;estimate.renderMaxSeconds=p!.estimate.renderMaxSeconds;estimate.renderQuote=p!.estimate.renderQuote;if(estimate.credits!=null)estimate.credits+=estimate.renderCredits;}
+ const updated=await StudioProduction.findOneAndUpdate({_id:p!._id,userId,status:'draft',approvedAt:null,updatedAt:p!.updatedAt},{$set:{settings:chosen.settings,steps,estimate,expiresAt:new Date(Date.now()+600000)}},{new:true});
+ if(updated){await CreditApproval.updateMany({productionId:p!._id,userId,status:'pending'},{$set:{status:'superseded'}});return ensureProductionApprovals(userId,productionId,conversationId);}
+ }
  const active=p!.activeApprovalId?await CreditApproval.exists({_id:p!.activeApprovalId,userId,status:'approved'}):null;
  if(!active&&p!.control!=='cancel'&&['draft','paused'].includes(p!.status)&&(!p!.approvedAt||p!.approvalMode==='cards')&&!p!.leaseUntil){
   const remaining=unfinished(p),first=remaining[0];
@@ -50,7 +57,7 @@ export async function ensureProductionApprovals(userId:string,productionId:strin
 export async function approveCreditCard(userId:string,approvalId:string,credits:number,ready=async()=>{
  if(!env.STUDIO_QUEUE_ENABLED)fail('The Studio background worker queue is disabled. Enable the Studio worker before approving generation.',503);
  if(!persistentStorageConfigured())fail('The Studio media storage is unavailable. Check the storage connection before retrying.',503);
- if(!env.OPENROUTER_API_KEY&&!env.GEMINI_API_KEY)fail('The Studio AI connection is unavailable. Reconnect the AI service before retrying.',503);
+ if(!env.OPENROUTER_API_KEY)fail('The Studio AI connection is unavailable. Reconnect the AI service before retrying.',503);
  if(!await studioWorkerOnline())fail('The Studio background worker is offline. Start the Studio worker, then retry approval.',503);
  return true;
 }){

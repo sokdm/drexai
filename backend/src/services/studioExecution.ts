@@ -54,6 +54,11 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     const result = await StudioProduction.updateOne({ _id: id, leaseToken }, { $set: { steps, ...values } });
     if (!result.matchedCount) { lostLease = true; throw new Error("Worker lease lost"); }
   }
+  async function executeWithFallback(input:any,run:()=>Promise<any>){
+    const {approvedMediaFallback}=await import("./modelPolicy.js");
+    return approvedMediaFallback(input,current?.input.approvedAlternatives||[],{credits:current!.credits,providerCostUsd:Number(current!.pricing?.providerCostUsd)},async()=>{current!.executionModel=input.model;await checkpoint();return run();},async replacement=>{await assertProviderBudget(input.model,replacement.providerCostUsd);await studioLog(production,'processing','Selected an approved compatible fallback: '+input.model,current!.key);await checkpoint();});
+  }
+
   async function finishControl() {
     const fresh = await StudioProduction.findById(id).select("control");
     if (fresh?.control === "cancel") {
@@ -143,9 +148,9 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           await checkpoint();
           await studioLog(production, "processing", `${step.label}: ${step.providerJobId ? "resuming provider operation" : "generation submitted"} / billable, approved ceiling ${step.credits} credits`, step.key);
           if (step.kind === "image") {
-            const outputs = await providers.image(input); output = outputs[0];
+            const outputs = await executeWithFallback(input,()=>providers.image(input)); output = outputs[0];
           } else if (step.kind === "audio") {
-            const speech = await providers.speech(input); output = { ...speech, providerUsage: speech.providerData?.usage ?? speech.providerData?.usage_metadata };
+            const speech = await executeWithFallback(input,()=>providers.speech(input)); output = { ...speech, providerUsage: speech.providerData?.usage ?? speech.providerData?.usage_metadata };
           } else {
             if (!step.providerJobId) { step.providerJobId = await providers.createVideo(input); await checkpoint(); }
             const operation = await providers.pollVideo(step.providerJobId);
@@ -169,7 +174,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         await checkpoint();
         asset = await MediaAsset.findOneAndUpdate({ productionId: production._id, productionStepKey: step.key, userId: production.userId }, { $setOnInsert: {
           projectId: production.projectId, jobId: production._id, sceneId: step.sceneId, type: step.kind,
-          provider: providerFor(step.input.model), model: step.input.model,
+          provider: providerFor(step.executionModel||step.input.model), model: step.executionModel||step.input.model,
           prompt: step.input.prompt ?? step.input.text ?? step.input.motionPrompt, voiceId: step.input.voiceId,
           characterName: step.input.speaker, ...stored, contentType: output.contentType,
           sizeBytes: output.buffer.length, durationSeconds: output.durationSeconds,

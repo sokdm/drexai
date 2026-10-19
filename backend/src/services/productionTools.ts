@@ -28,7 +28,7 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
   let snapshot: any = JSON.parse(JSON.stringify({ title: project!.title, summary: project!.summary, scenes: project!.scenes, characters: refs, niche, product: (project!.prompts as any)?.sourceSettings?.product }));
   if(!project!.approvedAt && allowDraftPlanning){snapshot.scenes=snapshot.scenes.map((scene:any)=>({...scene,approved:true}));snapshot.requiresScriptReview=true;}
   if(agentTaskId)snapshot.agentTaskId=agentTaskId;
-  let settings = input.settings;
+  let settings = {...input.settings,agentSelectModels:input.settings.agentSelectModels||/gemini|google\/|^veo-/i.test([input.settings.imageModel,input.settings.voiceModel,input.settings.videoModel].join(" "))};
   let source: any;
   if (input.sourceProductionId) {
     source = await StudioProduction.findOne({ _id: input.sourceProductionId, userId: userId, projectId: input.projectId });
@@ -43,6 +43,7 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
   let modelSelections:any[]=[];
   if(settings.agentSelectModels&&!source){const chosen=await (await import("./studioModelSelection.js")).affordableStudioSettings(snapshot,settings);settings=chosen.settings;modelSelections=chosen.selections;}
   const steps = buildStudioSteps(snapshot, settings);
+  for(const step of steps){const options=modelSelections.find(s=>s.kind===(step.kind==='audio'?'voice':step.kind))?.alternatives||[];step.input.approvedAlternatives=options.flatMap((o:any)=>o.steps.filter((s:any)=>s.key===step.key).map((s:any)=>({input:s.input,credits:s.credits,providerCostUsd:s.pricing?.providerCostUsd})));}
   if (source) {
     const selected = source.steps.find((s: StudioStep) => s.key === input.regenerateStepKey);
     if (!selected) fail("Select an output to regenerate");
@@ -52,7 +53,7 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
       if (old?.status === "completed" && old.assetId && !dependsOnSelection && (step.kind !== "video" || old.input.nativeAudio === true) && (step.kind !== "audio" || old.input.track === step.input.track)) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
     }
   }
-  const estimate:any = await priceStudioSteps(steps);estimate.modelSelections=modelSelections;
+  const estimate:any = await priceStudioSteps(steps);estimate.modelSelections=modelSelections.map(({alternatives,...selection})=>selection);
   if(settings.autoExport){
     const {GenerationPriceRule}=await import("../models/GenerationPriceRule.js");
     const rule=await GenerationPriceRule.findOne({feature:"final_rendering",provider:"ffmpeg",model:"ffmpeg",active:true});

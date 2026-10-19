@@ -39,7 +39,7 @@ async function own(req: Request) {
   return production!;
 }
 async function readiness() {
-  return { queueEnabled: env.STUDIO_QUEUE_ENABLED, storageConfigured: persistentStorageConfigured(), providerConfigured: Boolean(env.GEMINI_API_KEY || env.OPENROUTER_API_KEY), workerOnline: await studioWorkerOnline() };
+  return { queueEnabled: env.STUDIO_QUEUE_ENABLED, storageConfigured: persistentStorageConfigured(), providerConfigured: Boolean(env.OPENROUTER_API_KEY), workerOnline: await studioWorkerOnline() };
 }
 
 studioRouter.get("/config", wrap(async (req, res) => {

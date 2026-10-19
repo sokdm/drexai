@@ -61,6 +61,7 @@ export function veoRequest(settings: any) {
 }
 function veoClient() {
   // Native audio is inherent to this Veo model. No unsupported generateAudio or voice-ID parameter.
+  throw new Error("Direct Google video API access is disabled. Use the approved OpenRouter video route.");
   return new GoogleGenAI({ apiKey: env.GEMINI_API_KEY!, httpOptions: { timeout: 60000, retryOptions: { attempts: 1 } } });
 }
 export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 60 * 1000) {
