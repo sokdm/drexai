@@ -63,9 +63,12 @@ export async function checkProviderAffordability(estimate: number) {
   const [balance, key] = await Promise.all([syncProviderRecord("balance"), syncProviderRecord("key")]);
   const fresh = (row: any) => row?.syncedAt && !row.error && Date.now() - new Date(row.syncedAt).getTime() < policy.values.maxBalanceAgeMinutes * 60000;
   if (policy.values.requireBalanceCheck && !fresh(balance)) throw Object.assign(new Error("The generation service could not verify its available capacity. Please retry shortly; no new credits were reserved."),{code:"APPROVAL_STATE",statusCode:503});
-  if (fresh(balance) && balance.values.remainingUsd < estimate || fresh(key) && key.values.limit_remaining != null && key.values.limit_remaining < estimate) {
+  const accountBlocked = fresh(balance) && Number.isFinite(balance.values.remainingUsd) && balance.values.remainingUsd < estimate;
+  const keyBlocked = fresh(key) && Number.isFinite(key.values.limit_remaining) && key.values.limit_remaining < estimate;
+  if (accountBlocked || keyBlocked) {
+    console.warn(JSON.stringify({event:"production_capacity_blocked",reason:accountBlocked?"account_balance":"generation_key_limit",estimatedCostUsd:estimate,accountRemainingUsd:fresh(balance)?balance.values.remainingUsd:undefined,keyRemainingUsd:fresh(key)?key.values.limit_remaining:undefined}));
     await adminAlert("openrouter-insufficient", "OpenRouter funds are insufficient", "A new generation was blocked before submission. Review balance and key-level limits.", "critical");
-    throw Object.assign(new Error("The generation service currently has insufficient capacity for this operation. Choose a smaller operation or retry after support restores capacity. No new credits were reserved."),{code:"APPROVAL_STATE",statusCode:503});
+    throw Object.assign(new Error("The selected operation exceeds the generation service's available capacity. Use Change model / quality to review a lower-cost quote. If alternatives also fail, the service account needs funding or its generation-key spending limit needs increasing. No new credits were reserved."),{code:"APPROVAL_STATE",statusCode:503});
   }
 }
 export async function verifyGenerationCost(generationId: string) {

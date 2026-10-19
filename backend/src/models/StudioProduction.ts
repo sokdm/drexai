@@ -5,6 +5,7 @@ const productionSchema = new Schema({
   projectId: { type: Schema.Types.ObjectId, required: true, index: true },
   sourceProductionId: String,
   title: String,
+  qualityReport: Schema.Types.Mixed,
   attempts: { type: Number, default: 0 },
   status: { type: String, enum: ["draft", "queued", "running", "awaiting_credit_execution", "executing_approval", "paused", "failed", "needs_review", "cancelled", "completed"], default: "draft", index: true },
   control: { type: String, enum: ["run", "pause", "cancel"], default: "pause" },

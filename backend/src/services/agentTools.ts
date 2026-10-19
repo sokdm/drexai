@@ -5,7 +5,7 @@ import { ensureProductionEdit, applyProductionEdit } from "./sharedEditing.js";
 import { prepareProduction, controlProduction } from "./productionTools.js";
 import { z } from "zod";
 const id=z.string().regex(/^[a-f\d]{24}$/i);
-export const productionToolNames=["inspect_production","list_assets","list_asset_packs","apply_asset_pack","edit_timeline","prepare_production","production_exports","control_production","regenerate_output"] as const;
+export const productionToolNames=["inspect_production","inspect_quality","list_assets","list_asset_packs","apply_asset_pack","edit_timeline","prepare_production","production_exports","control_production","regenerate_output"] as const;
 export async function executeProductionTool(tool:{name:string;query:string},context:{userId:string;productionId?:string;projectId?:string;settings?:any;allowTimelineEdits:boolean}){
  if(!(productionToolNames as readonly string[]).includes(tool.name))throw new Error("Unsupported production tool");
  const {userId,allowTimelineEdits}=context;
@@ -38,7 +38,8 @@ export async function executeProductionTool(tool:{name:string;query:string},cont
 
      if (!production) throw new Error("Choose an owned Studio production before using production tools");
      await StudioEvent.create({ productionId: production._id, userId: userId, level: "processing", message: "AI Director tool: " + tool.name });
-     if (tool.name === "inspect_production") result = { id: production._id, status: production.status, steps: production.steps.map((s: any) => ({ key:s.key,label: s.label, status: s.status, error: s.error,credits:s.credits })) };
+     if(tool.name==="inspect_quality"){const {inspectProductionQuality}=await import("./productionQuality.js");result=await inspectProductionQuality(userId,String(production._id));}
+     else if (tool.name === "inspect_production") result = { id: production._id, status: production.status, steps: production.steps.map((s: any) => ({ key:s.key,label: s.label, status: s.status, error: s.error,credits:s.credits })) };
      else if (tool.name === "list_assets") result = await MediaAsset.find({ userId: userId, productionId: production._id, deletedAt: null }).select("type sceneId durationSeconds metadata.name").lean();
      else if (tool.name === "list_asset_packs") { const { AssetPack } = await import("../routes/assetPacks.js"); result = await AssetPack.find({ active:true }).select("name kind license").limit(50).lean(); }
      else {
