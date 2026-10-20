@@ -23,21 +23,22 @@ export const pricingPolicySchema = z.object({
   monthlyInfrastructureUsd: usd, requireBalanceCheck: z.boolean(),
   featurePolicies: z.record(z.object({ markup: z.number().min(1).max(100).optional(), marginPct: pct.optional(), minimumCredits: z.number().int().min(1).max(10000).optional() })).default({})
 });
-export const defaultPricingPolicy = { markup: 3, marginPct: 0, minimumCredits: 1, imageMinimumCredits: 5, paymentFeePct: 3, providerFeePct: 0, contingencyPct: 0, renderingUsd: 0, storageUsd: 0, otherUsd: 0, roundingCredits: 1, maxJobUsd: 20, userDailyUsd: 50, globalDailyUsd: 200, maxInputTokens: 20000, maxOutputTokens: 12000, lowBalanceUsd: 2, criticalBalanceUsd: 1, maxBalanceAgeMinutes: 5, monthlyInfrastructureUsd: 0, requireBalanceCheck: false, featurePolicies: {} };
+export const defaultPricingPolicy = { markup: 3, marginPct: 50, minimumCredits: 1, imageMinimumCredits: 5, paymentFeePct: 3, providerFeePct: 0, contingencyPct: 0, renderingUsd: 0, storageUsd: 0, otherUsd: 0, roundingCredits: 1, maxJobUsd: 20, userDailyUsd: 50, globalDailyUsd: 200, maxInputTokens: 20000, maxOutputTokens: 12000, lowBalanceUsd: 2, criticalBalanceUsd: 1, maxBalanceAgeMinutes: 5, monthlyInfrastructureUsd: 0, requireBalanceCheck: false, featurePolicies: {} };
 export async function getPricingPolicy() {
   const row = await PricingPolicy.findById("global").lean();
   return { revision: row?.revision || 1, values: pricingPolicySchema.parse({ ...defaultPricingPolicy, ...(row?.values || {}) }) };
 }
 export function calculateCreditPrice(cost: string | number, packages: { amount: number; credits: number; currency?: string; active?: boolean }[], policy: any, quantity = 1, image = false) {
+  if(!Number.isFinite(quantity)||quantity<=0)throw new Error("Pricing quantity must be positive and finite");
   const rates = packages.filter(p => p.active !== false && (!p.currency || p.currency === "USD") && p.credits > 0 && p.amount > 0).map(p => new Decimal(p.amount).div(p.credits));
   if (!rates.length) throw new Error("An active USD credit package is required for pricing");
   const creditUsd = Decimal.min(...rates), netCreditUsd = creditUsd.mul(new Decimal(1).minus(new Decimal(policy.paymentFeePct).div(100)));
   const providerUsd = new Decimal(cost); if (!providerUsd.isFinite() || providerUsd.lte(0)) throw new Error("Provider cost must have a positive verified estimate");
   const operating = new Decimal(policy.renderingUsd).plus(policy.storageUsd).plus(policy.otherUsd);
   const protectedCost = providerUsd.mul(new Decimal(1).plus(new Decimal(policy.providerFeePct).div(100))).plus(operating).mul(new Decimal(1).plus(new Decimal(policy.contingencyPct).div(100)));
-  const targetNet = Decimal.max(protectedCost.mul(policy.markup), protectedCost.div(new Decimal(1).minus(new Decimal(policy.marginPct).div(100))));
+  const targetNet = Decimal.max(protectedCost.mul(policy.markup), protectedCost.div(new Decimal(1).minus(Decimal.max(50,policy.marginPct).div(100))));
   const minimum = image ? new Decimal(policy.imageMinimumCredits).mul(quantity) : new Decimal(policy.minimumCredits);
-  const credits = Decimal.max(targetNet.div(netCreditUsd), minimum).div(policy.roundingCredits).ceil().mul(policy.roundingCredits);
+  const credits = Decimal.max(targetNet.div(netCreditUsd), protectedCost.div("0.008").ceil(), minimum).div(policy.roundingCredits).ceil().mul(policy.roundingCredits);
   if ((!credits.isInteger() || credits.gt(Number.MAX_SAFE_INTEGER)) || credits.gt(1000000)) throw new Error("Price exceeds the configured safety limit");
   return { credits: credits.toNumber(), providerUsd: providerUsd.toString(), protectedCostUsd: protectedCost.toString(), creditUsd: creditUsd.toString(), netCreditUsd: netCreditUsd.toString(), grossCreditValueUsd: credits.mul(creditUsd).toString(), estimatedMarginPct: new Decimal(1).minus(protectedCost.div(credits.mul(netCreditUsd))).mul(100).toFixed(4) };
 }

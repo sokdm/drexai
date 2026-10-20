@@ -13,7 +13,7 @@ import { Wallet } from "../models/Wallet.js";
 
 export async function seedCreditConfig() {
   await CreditPackage.updateOne({ key: "starter" }, { $setOnInsert: { key: "starter", name: "Starter", credits: 1000, amount: 20, currency: "USD", sortOrder: 1, active: true } }, { upsert: true });
-  await CreditPackage.updateOne({ key: "creator" }, { $setOnInsert: { key: "creator", name: "Creator", credits: 5000, amount: 90, currency: "USD", sortOrder: 2, active: true } }, { upsert: true });
+  await CreditPackage.updateOne({ key: "creator" }, { $setOnInsert: { key: "creator", name: "Creator", credits: 5000, amount: 80, currency: "USD", sortOrder: 2, active: true } }, { upsert: true });
   await CreditPackage.updateOne({ key: "mini" }, { $setOnInsert: { key: "mini", name: "Mini", credits: 500, amount: 10, currency: "USD", sortOrder: 0, active: true } }, { upsert: true });
   const migrationSession = await mongoose.startSession();
   try { await migrationSession.withTransaction(async () => {
@@ -24,6 +24,7 @@ export async function seedCreditConfig() {
     }
     await AppMigration.create([{ _id: "credit-packages-20261016", appliedAt: new Date() }], { session: migrationSession });
   }); } finally { await migrationSession.endSession(); }
+  const creatorSession=await mongoose.startSession();try{await creatorSession.withTransaction(async()=>{if(await AppMigration.findById('creator-value-20261020').session(creatorSession))return;const old=await CreditPackage.findOneAndUpdate({key:'creator',credits:5000,amount:90,currency:'USD',promotion:{$in:['',null]}},{$set:{amount:80}},{session:creatorSession});if(old)await AdminAudit.create([{action:'creator-package-value-update',target:'creator',reason:'Owner requested Creator credits valued at 0.016 USD each',before:{amount:90,credits:5000},after:{amount:80,credits:5000}}],{session:creatorSession});await AppMigration.create([{_id:'creator-value-20261020',appliedAt:new Date()}],{session:creatorSession});});}finally{await creatorSession.endSession();}
   const rules = [
     ["ai_research_chat", "gemini", "gemini-3.8-flash", "request"],
     ["publishing_optimization", "gemini", "gemini-3.8-flash", "request"],
@@ -49,6 +50,7 @@ export async function ensureWallet(userId: string, session?: mongoose.ClientSess
 }
 
 export async function creditPurchase({ userId, credits, idempotencyKey, metadata }: { userId: string; credits: number; idempotencyKey: string; metadata: Record<string, unknown> }) {
+  if(!Number.isSafeInteger(credits)||credits<=0)throw new Error("Purchase credits must be a positive safe integer");
   const session = await mongoose.startSession();
   await session.withTransaction(async () => {
     const existing = await LedgerEntry.findOne({ idempotencyKey }).session(session);
@@ -69,7 +71,11 @@ export async function createQuote(input: any) {
   if (isOpenRouter(input.model) && (!rule || !(rule.providerCostUsd > 0))) return { allowed: false, credits: 0, reason: "Configure verified OpenRouter provider pricing before generating." };
   if (!rule) return { allowed: false, credits: 0, reason: "Pricing is not active until provider costs are verified." };
   const quantity = Math.max(1, Number(input.quantity ?? 1));
-  const credits = Math.ceil(rule.creditsPerUnit * quantity);
+  if(!(rule.providerCostUsd>0))return {allowed:false,credits:0,reason:"A verified positive provider cost is required for paid operations."};
+  const {calculateCreditPrice,getPricingPolicy}=await import("./creditPricingEngine.js");
+  const policy=await getPricingPolicy();const packages=await CreditPackage.find({active:true,currency:"USD"}).lean();
+  const floor=calculateCreditPrice(rule.providerCostUsd*quantity,packages,{...policy.values,marginPct:Math.max(50,policy.values.marginPct,Number(rule.desiredMarginPct||0))},quantity,input.feature==="text_to_image");
+  const credits = Math.max(Math.ceil(rule.creditsPerUnit * quantity),floor.credits);
   return { allowed: true, credits, feature: input.feature, provider: input.provider, model: input.model, estimatedCostUsd: rule.providerCostUsd > 0 ? rule.providerCostUsd * quantity : null, ruleId: rule._id, quantity, expiresAt: new Date(Date.now() + 10 * 60 * 1000) };
 }
 

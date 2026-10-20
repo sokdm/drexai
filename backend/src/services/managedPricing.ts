@@ -16,7 +16,9 @@ export async function managedPrice(feature: string, provider: string, settings: 
   const estimate = rule && rule.providerCostUsd > 0 ? rule.providerCostUsd * quantity : null;
   if (control && (estimate === null || estimate > control.maxJobCostUsd)) throw new Error("Provider cost is unknown or exceeds the maximum permitted job spending.");
   await assertProviderBudget(settings.model, estimate);
-  return { credits: rule ? Math.ceil(rule.creditsPerUnit * quantity) : fallback, feature, provider, model: settings.model, unit, quantity, estimatedCostUsd: estimate, ruleId: rule?._id, expiresAt: new Date(Date.now() + 600000) };
+  if(!rule||!(Number(estimate)>0))throw new Error('Verified provider pricing is required before quoting a paid operation.');
+  const {createQuote}=await import('./wallet.js');const quote=await createQuote({feature,provider,model:settings.model,unit,quantity,settings,ruleId:rule._id});if(!quote.allowed)throw new Error('This operation has no verified profitable price.');
+  return { credits: quote.credits, feature, provider, model: settings.model, unit, quantity, estimatedCostUsd: estimate, ruleId: rule?._id, expiresAt: new Date(Date.now() + 600000) };
 }
 export async function rememberQuote(userId: any, settings: any, quote: any) { await ApprovedQuote.create({ userId, token: randomToken(24), fingerprint: fingerprint(settings), quote, expiresAt: new Date(Date.now() + 600000) }); return quote; }
 export async function approvedTerms(userId: any, settings: any, credits: number, current: () => Promise<any>) {
