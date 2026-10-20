@@ -71,6 +71,8 @@ walletRouter.post("/payments/initiate", requireCsrf, async (req, res, next) => {
   }
 });
 
+walletRouter.post('/payments/cancel',requireCsrf,async(req,res,next)=>{try{const {txRef}=z.object({txRef:z.string().min(1).max(150)}).parse(req.body);const payment=await Payment.findOne({txRef,userId:req.user._id});if(!payment)return res.status(404).json({error:'Payment not found'});await Payment.updateOne({_id:payment._id,userId:req.user._id,status:'pending'},{$set:{status:'cancelled'},$push:{audit:{event:'checkout_cancel_requested',details:{source:'authenticated_user'}}}});res.json({payment:await Payment.findById(payment._id),message:'Pending checkout dismissed. Any actual payment will still be verified with Flutterwave.'});}catch(e){next(e);}});
+
 walletRouter.post("/payments/verify", requireCsrf, async (req, res, next) => {
   try {
     const { transactionId, txRef } = z.object({ transactionId: z.union([z.string(), z.number()]).optional(), txRef: z.string() }).parse(req.body);
@@ -99,20 +101,15 @@ walletRouter.post(["/reservations", "/reservations/:id/settle", "/reservations/:
 });
 
 async function finalizePayment(payment: any, tx: any) {
-  if (payment.status === "successful") {
-    await creditPurchase({ userId: String(payment.userId), credits: payment.credits, idempotencyKey: 'payment:' + payment.txRef, metadata: { paymentId: payment._id } });
-    return;
+  // Never trust browser return parameters or webhook status without provider verification.
+  if(tx.tx_ref!==payment.txRef)throw new Error('Verified transaction reference does not match this checkout');
+  const amount=Number(tx.amount);
+  const valid=tx.status==='successful'&&tx.currency===payment.currency&&Number.isFinite(amount)&&amount>=payment.amount&&String(tx.id??'').length>0;
+  if(!valid){
+    const status=tx.status==='cancelled'?'cancelled':tx.status==='failed'?'failed':tx.status==='successful'?'rejected':'pending';
+    if(status==='pending')return;
+    await Payment.updateOne({_id:payment._id,status:{$ne:'successful'}},{$set:{status},$push:{audit:{event:'verified_'+status,details:{transactionId:tx.id,status:tx.status}}}});return;
   }
-  const valid = tx.status === "successful" && tx.tx_ref === payment.txRef && tx.currency === payment.currency && Number(tx.amount) >= payment.amount;
-  payment.flutterwaveId = String(tx.id ?? payment.flutterwaveId ?? "");
-  payment.receipt = tx;
-  payment.audit.push({ event: valid ? "verified_success" : "verified_rejected", details: tx });
-  if (!valid) {
-    payment.status = "rejected";
-    await payment.save();
-    return;
-  }
-  await creditPurchase({ userId: String(payment.userId), credits: payment.credits, idempotencyKey: `payment:${payment.txRef}`, metadata: { paymentId: payment._id, tx } });
-  payment.status = "successful";
-  await payment.save();
+  await creditPurchase({userId:String(payment.userId),credits:payment.credits,idempotencyKey:'payment:'+payment.txRef,metadata:{paymentId:payment._id,tx}});
+  await Payment.updateOne({_id:payment._id,status:{$ne:'successful'}},{$set:{status:'successful',flutterwaveId:String(tx.id),receipt:tx},$push:{audit:{event:'verified_success',details:{transactionId:tx.id}}}});
 }

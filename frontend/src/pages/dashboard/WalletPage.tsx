@@ -30,10 +30,12 @@ export function WalletPage() {
     const txRef = params.get("tx_ref");
     const transactionId = params.get("transaction_id");
     if (!txRef) return;
-    api("/api/wallet/payments/verify", { method: "POST", body: JSON.stringify({ txRef, transactionId: transactionId ?? undefined }) })
+    api(params.get("status")==="cancelled"&&!transactionId?"/api/wallet/payments/cancel":"/api/wallet/payments/verify", { method: "POST", body: JSON.stringify({ txRef, transactionId: transactionId ?? undefined }) })
       .then(() => load())
       .catch((err) => setError(err instanceof Error ? err.message : "Payment verification is pending"));
   }, []);
+
+  async function cancelCheckout(txRef:string){try{await api("/api/wallet/payments/cancel",{method:"POST",body:JSON.stringify({txRef})});await load();}catch(e:any){setError(e.message);}}
 
   async function buy(packageId: string) {
     setError("");
@@ -62,13 +64,13 @@ export function WalletPage() {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
-        <History title="Purchase history" icon={<ReceiptText />} rows={data?.payments ?? []} empty="No purchases yet." />
+        <History title="Purchase history" icon={<ReceiptText />} rows={data?.payments ?? []} empty="No purchases yet." onCancel={cancelCheckout} />
         <History title="Credit ledger" icon={<ShieldCheck />} rows={data?.ledger ?? []} empty="No wallet activity yet." />
       </section>
     </div>
   );
 }
 
-function History({ title, rows, empty, icon }: { title: string; rows: any[]; empty: string; icon: JSX.Element }) {
-  return <div className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center gap-3 font-black">{icon}{title}</div><div className="mt-4 space-y-3">{rows.length === 0 && <p className="text-sm text-slate-500">{empty}</p>}{rows.map((row) => <div className="rounded-md border border-line p-3 text-sm dark:border-slate-700" key={row._id}><strong>{row.type ?? row.status}</strong><br /><span className="text-slate-500">{new Date(row.createdAt).toLocaleString()}</span><pre className="mt-2 overflow-auto text-xs text-slate-500">{JSON.stringify(row.receipt ?? row.metadata ?? {}, null, 2).slice(0, 500)}</pre></div>)}</div></div>;
+function History({ title, rows, empty, icon, onCancel }: { title: string; rows: any[]; empty: string; icon: JSX.Element; onCancel?:(txRef:string)=>Promise<void> }) {
+  return <div className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center gap-3 font-black">{icon}{title}</div><div className="mt-4 space-y-3">{rows.length === 0 && <p className="text-sm text-slate-500">{empty}</p>}{rows.map((row) => <div className="rounded-md border border-line p-3 text-sm dark:border-slate-700" key={row._id}><strong>{row.type ?? row.status}</strong>{row.status==="pending"&&onCancel&&<button className="ml-3 text-brand" onClick={()=>void onCancel(row.txRef)}>Cancel pending checkout</button>}<br /><span className="text-slate-500">{new Date(row.createdAt).toLocaleString()}</span><pre className="mt-2 overflow-auto text-xs text-slate-500">{JSON.stringify(row.receipt ?? row.metadata ?? {}, null, 2).slice(0, 500)}</pre></div>)}</div></div>;
 }
