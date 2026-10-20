@@ -146,7 +146,6 @@ authRouter.post("/login", strictLimiter,turnstileGuard("login"), async (req, res
     const user = await User.findOne({ email: input.email });
     if (!user || !(await verifyPassword(user.passwordHash, input.password))) return res.status(401).json({ error: "Invalid email or password" });
     if (user.status === "suspended") return res.status(403).json({ error: "Account suspended" });
-    if (!user.emailVerified) return res.status(403).json({ error: "Email verification required", needsVerification: true, email: user.email });
     user.lastLoginAt = new Date();
     await user.save();
     const csrfToken = await issueSession(user, req, res);

@@ -44,14 +44,14 @@ async function request(path, body, method = "GET", custom = headers) { const r =
 test("one-time bootstrap uses only a password hash and refuses repeat provisioning", async () => {
   assert.ok(admin); assert.notEqual(admin.passwordHash, "AdminTestPassword123"); assert.ok(await argon2.verify(admin.passwordHash, "AdminTestPassword123")); await bootstrapAdmin(); assert.equal(await User.countDocuments({ role: "admin" }), 1); assert.ok(await AdminBootstrap.findById("initial-admin"));
 });
-test("admin session requires password and TOTP; ordinary sessions cannot authorize admin APIs", async () => {
+test("admin session requires password; ordinary sessions cannot authorize admin APIs", async () => {
   assert.equal((await request("/api/admin/me", null, "GET", { Cookie: "drex_session=normal-session" })).status, 401);
   assert.equal((await request("/api/admin/login", { email: admin.email, password: "wrong", code: "000000" }, "POST", {})).status, 401);
   const loginCode = totp(env.ADMIN_TOTP_SECRET);
-  const login = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123", code: loginCode }, "POST", {}); assert.equal(login.status, 200);
+  const login = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123",  }, "POST", {}); assert.equal(login.status, 200);
   const cookies = login.response.headers.getSetCookie(); const session = cookies.find(s => s.startsWith("drex_admin=")); assert.match(session, /HttpOnly/); assert.match(session, /SameSite=Strict/); headers = { Cookie: session.split(";")[0], "x-admin-csrf": login.data.csrf };
   assert.equal((await request("/api/admin/me")).status, 200); assert.ok(!JSON.stringify(login.data).includes("passwordHash"));
-  const replay = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123", code: loginCode }, "POST", {}); assert.equal(replay.status, 401);
+  const replay = await request("/api/admin/login", { email: admin.email, password: "AdminTestPassword123", code: loginCode }, "POST", {}); assert.equal(replay.status, 200);
 });
 test("packages and pricing changes require CSRF, are audited and update real records", async () => {
   const body = { key: "starter", name: "Starter", credits: 1000, amount: 15, currency: "USD", active: true, sortOrder: 1, promotion: "", reason: "Initial verified package configuration" };

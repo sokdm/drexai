@@ -3,10 +3,7 @@ import { assetPackRouter } from "./assetPacks.js";
 import { adminOperationsRouter } from "./adminOperations.js";
 import { GatewayBinding, GatewayUsage, isOpenRouter, providerFor, verifiedRouterModel } from "../services/openrouter.js";
 import { routerAdminCatalog, routerPricing } from "../services/openrouterAdmin.js";
-import { emailConfigured, sendTransactionalEmail } from "../services/email.js";
 import { verifyPassword } from "../utils/password.js";
-import { randomInt } from "node:crypto";
-import { AdminLoginCode } from "../models/Admin.js";
 import { closeStudioReserve } from "../services/studioBilling.js";
 import { supportRouter } from "./support.js";
 import { feedbackRouter } from "./feedback.js";
@@ -27,7 +24,7 @@ import { GenerationPriceRule } from "../models/GenerationPriceRule.js";
 import { SupportTicket } from "../models/SupportTicket.js";
 import { Feedback } from "../models/Feedback.js";
 import { AdminAudit, AdminSession, PlatformControl, ProviderControl } from "../models/Admin.js";
-import { verifiedTotpStep, requireAdmin } from "../services/adminSecurity.js";
+import { requireAdmin } from "../services/adminSecurity.js";
 import { randomToken, hashSecret } from "../utils/crypto.js";
 import { overview, jobModels, csv } from "../services/adminReports.js";
 import { ensureWallet, releaseReservation } from "../services/wallet.js";
@@ -40,37 +37,14 @@ const wrap = (f: any) => (req: any, res: any, next: any) => Promise.resolve(f(re
 const id = z.string().regex(/^[a-f\d]{24}$/i), reason = z.string().trim().min(10).max(1000);
 const secure = () => env.APP_URL.startsWith("https:");
 const audit = (req: any, action: string, target: string, why: string, before: any, after: any, session?: any) => AdminAudit.create([{ actorId: req.adminUser._id, action, target, reason: why, before, after }], { session });
-adminRouter.get("/login-options", (_req, res) => res.json({ method: env.ADMIN_LOGIN_METHOD }));
+adminRouter.get("/login-options", (_req, res) => res.json({ method: "password" }));
 adminRouter.post("/login", rateLimit({ windowMs: 15 * 60000, limit: 8, standardHeaders: true, legacyHeaders: false }), wrap(async (req: any, res: any) => {
   await verifyTurnstile(req.body?.turnstileToken,"admin_login",req.ip);
   const input = z.object({ email: z.string().email().transform(v => v.toLowerCase()), password: z.string().min(1).max(200), code: z.string().default(""), challengeId: z.string().max(100).optional() }).parse(req.body);
   const user = await User.findOne({ email: input.email, role: "admin", status: "active" }).select("+passwordHash");
   if (!user || !await verifyPassword(user.passwordHash, input.password)) return res.status(401).json({ error: "Invalid administrator credentials" });
-  if (env.ADMIN_LOGIN_METHOD === "email") {
-    if (!input.challengeId) {
-      if (!emailConfigured()) return res.status(503).json({ error: "Administrator email delivery is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and EMAIL_FROM." });
-      const challengeId = randomToken(32), code = String(randomInt(0, 1000000)).padStart(6, "0");
-      await AdminLoginCode.updateMany({ userId: user._id, consumedAt: null }, { $set: { consumedAt: new Date() } });
-      await AdminLoginCode.create({ _id: challengeId, userId: user._id, codeHash: hashSecret(challengeId + ":" + code), expiresAt: new Date(Date.now() + 10 * 60000) });
-      try {
-        await sendTransactionalEmail(user.email, "Your Drex administrator sign-in code", "Your code is " + code + ". It expires in 10 minutes and can be used once. If you did not request it, do not share it.", "admin-login-" + challengeId);
-        await AdminLoginCode.updateOne({ _id: challengeId, consumedAt: null }, { delivered: true });
-      } catch { await AdminLoginCode.deleteOne({ _id: challengeId }); return res.status(502).json({ error: "Could not send the sign-in code. Please try again." }); }
-      return res.json({ challengeId, message: "A sign-in code has been sent to your administrator email.", method: "email" });
-    }
-    const challenge = await AdminLoginCode.findOneAndUpdate({ _id: input.challengeId, userId: user._id, delivered: true, consumedAt: null, attempts: { $lt: 5 }, expiresAt: { $gt: new Date() } }, { $inc: { attempts: 1 } }, { new: true });
-    if (!challenge || !/^\d{6}$/.test(input.code) || challenge.codeHash !== hashSecret(input.challengeId + ":" + input.code)) return res.status(401).json({ error: "Invalid or expired email code. Request a new code." });
-    const used = await AdminLoginCode.updateOne({ _id: input.challengeId, consumedAt: null }, { consumedAt: new Date() });
-    if (!used.modifiedCount) return res.status(401).json({ error: "This code has already been used." });
-  } else {
-  if (!env.ADMIN_TOTP_SECRET) return res.status(503).json({ error: "Configure administrator multi-factor authentication before signing in." });
-  const verifiedStep = verifiedTotpStep(input.code);
-  if (verifiedStep === null) return res.status(401).json({ error: "Invalid administrator credentials or authentication code" });
-  const fresh = await User.updateOne({ _id: user._id, $or: [{ adminTotpStep: { $lt: verifiedStep } }, { adminTotpStep: { $exists: false } }] }, { $set: { adminTotpStep: verifiedStep } });
-  if (!fresh.modifiedCount) return res.status(401).json({ error: "This authentication code was already used. Wait for the next code." });
-  }
   const token = randomToken(32), csrf = randomToken(24); await AdminSession.create({ userId: user._id, tokenHash: hashSecret(token), csrfHash: hashSecret(csrf), expiresAt: new Date(Date.now() + 4 * 3600000) });
-  await AdminAudit.create({ actorId: user._id, action: "admin-login", target: String(user._id), reason: "Password and " + env.ADMIN_LOGIN_METHOD + " verification completed" });
+  await AdminAudit.create({ actorId: user._id, action: "admin-login", target: String(user._id), reason: "Password sign-in completed; Cloudflare verification " + (env.TURNSTILE_ENABLED ? "passed" : "disabled") });
   res.clearCookie("drex_admin",{path:"/api"});res.cookie("drex_admin", token, { httpOnly: true, sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/" }); res.cookie("drex_admin_csrf", csrf, { sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/" }); res.json({ user: { id: user._id, displayName: user.displayName, email: user.email }, csrf });
 }));
 adminRouter.use(requireAdmin);
