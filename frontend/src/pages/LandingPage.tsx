@@ -1,3 +1,4 @@
+import {formatPackagePrice} from "../lib/money";
 import { brand } from "@drex/shared";
 import { BookOpenText, Bot, Check, ChevronRight, Image, Menu, Mic, Play, Search, Sparkles, Video, X } from "lucide-react";
 import { api } from "../lib/api";
@@ -53,7 +54,7 @@ export function LandingPage() {
 
         <section id="features" className="mx-auto max-w-7xl px-4 py-16">
           <SectionTitle title="A serious workspace for content production" text="Phase 1 previews the workflows and surfaces without pretending the automation is live yet." />
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">{features.map(([label, Icon]) => <div className="rounded-md border border-line bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" key={label as string}><Icon className="mb-5 text-brand dark:text-brand-dark" /><h3 className="font-bold">{label as string}</h3><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Polished preview state ready for future production logic.</p></div>)}</div>
+          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">{features.map(([label, Icon]) => <div className="rounded-md border border-line bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900" key={label as string}><Icon className="mb-5 text-brand dark:text-brand-dark" /><h3 className="font-bold">{label as string}</h3><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Polished preview state ready for future production logic.</p></div>)}</div>
         </section>
 
         <section id="how-it-works" className="border-y border-line bg-white py-16 dark:border-slate-800 dark:bg-slate-900/45">
@@ -73,7 +74,7 @@ export function LandingPage() {
         </section>
 
         <section id="credit-pricing" className="border-y border-line bg-white py-16 dark:border-slate-800 dark:bg-slate-900/45">
-          <div className="mx-auto max-w-7xl px-4"><SectionTitle title="Credit pricing" text="Pay as you go with no mandatory monthly subscription. Packages are reusable backend-driven components." /><div className="grid gap-4 md:grid-cols-2">{creditPackages.map((pkg) => <div className="rounded-md border border-line p-6 dark:border-slate-700" key={pkg._id}><h3 className="text-xl font-black">{pkg.name}</h3><p className="mt-3 text-4xl font-black">{pkg.currency} {pkg.amount}</p><p className="mt-2 text-slate-600 dark:text-slate-300">{pkg.credits.toLocaleString()} credits</p><p>{pkg.promotion}</p><Link to="/dashboard/credit-wallet" className="mt-6 inline-block">Choose package</Link></div>)}</div></div>
+          <div className="mx-auto max-w-7xl px-4"><SectionTitle title="Credit pricing" text="Pay as you go with no mandatory monthly subscription. Choose a credit package and approve each paid generation before it starts." /><div className="grid gap-4 md:grid-cols-2">{creditPackages.map((pkg) => <div className="rounded-md border border-line p-6 dark:border-slate-700" key={pkg._id}><h3 className="text-xl font-black">{pkg.name}</h3><p className="mt-3 text-4xl font-black">{formatPackagePrice(pkg.amount,pkg.currency)}</p><p className="mt-2 text-slate-600 dark:text-slate-300">{pkg.credits.toLocaleString()} credits</p><p>{pkg.promotion}</p><Link to="/dashboard/credit-wallet" className="mt-6 inline-block">Choose package</Link></div>)}</div></div>
         </section>
 
         <section id="faq" className="mx-auto max-w-4xl px-4 py-16"><SectionTitle title="FAQ" text="Clear expectations for Phase 1." />{["Are AI generation tools live?", "Is this a subscription?", "Can the brand change later?"].map((q) => <details className="mb-3 rounded-md border border-line bg-white p-5 dark:border-slate-800 dark:bg-slate-900" key={q}><summary className="cursor-pointer font-bold">{q}</summary><p className="mt-3 text-slate-600 dark:text-slate-300">This phase builds the professional foundation and UI. Production integrations arrive in later phases.</p></details>)}</section>
