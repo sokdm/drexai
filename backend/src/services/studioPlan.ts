@@ -55,7 +55,12 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
     if (segments.length > 50) throw new Error("A scene supports up to 50 speech segments");
     segments.forEach((segment, index) => {
       const character = snapshot.characters.find(c => c.name === segment.speaker);
-      const voiceId = settings.characterVoices?.[segment.speaker] ?? character?.voicePreference ?? settings.voiceId;
+      // Script character preferences may describe a voice or belong to a previous
+      // provider. Only reuse them when supported by the model being quoted.
+      // Explicit user overrides still go through strict validation below.
+      const supportedVoices = ttsModels.find(model => model.id === settings.voiceModel)!.voices;
+      const preferredVoice = supportedVoices.includes(character?.voicePreference) ? character.voicePreference : settings.voiceId;
+      const voiceId = settings.characterVoices?.[segment.speaker] ?? preferredVoice;
       const input = validateTtsSettings({ ...segment, model: settings.voiceModel, voiceId, language: settings.language, style: settings.style, mode: "single", speakers: [] });
       if (input.text.length > 8000) throw new Error("Split speech segments longer than 8,000 characters before production");
       add(scene, "audio", `-${index}`, input, `${segment.track} (${segment.speaker})`);

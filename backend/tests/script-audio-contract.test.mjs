@@ -9,3 +9,17 @@ test('new script contracts quote one planning call plus one call per scene and p
 test("clip limit is a ceiling, not a default count",()=>{const cfg=studioSettingsSchema.parse({...settings,maxClipsPerScene:3,targetSeconds:20,narration:false});const scenes=[1,2,3].map(n=>({...scene,_id:String(n),order:n,audioMode:"silent",estimatedDurationSeconds:n===3?6:7}));const clips=buildStudioSteps({title:"Short",characters:[],scenes},cfg).filter(s=>s.kind==="video");assert.equal(clips.length,3);assert.deepEqual(clips.map(s=>s.input.durationSeconds),[7,7,6]);});
 
 test("long dialogue selects a longer supported clip before rejecting the clip ceiling",()=>{const cfg=studioSettingsSchema.parse({...settings,maxClipsPerScene:3,targetSeconds:67,narration:false});const s={...scene,audioMode:"dialogue",estimatedDurationSeconds:67,dialogueLines:[{speaker:"A",text:Array(145).fill("word").join(" ")}]};const clips=buildStudioSteps({title:"Long dialogue",characters:[],scenes:[s]},cfg).filter(s=>s.kind==="video");assert.equal(clips.length,3);assert.ok(clips.every(c=>c.input.durationSeconds>=26));assert.equal(clips.flatMap(c=>c.input.dialogueLines).map(l=>l.text).join(" ").split(/\s+/).length,145);});
+
+test('stale generated narrator preferences cannot override a compatible production voice',()=>{
+ const cfg=studioSettingsSchema.parse({...settings,video:false,voiceModel:'openrouter/elevenlabs/eleven-flash-v2.5',voiceId:'george'});
+ for(const voicePreference of ['Kore','warm cinematic narrator','unknown-provider-voice']){
+  const snapshot={title:'Narration',characters:[{name:'Narrator',voicePreference}],scenes:[{...scene,audioMode:'narration',offscreenNarration:true}]};
+  const before=JSON.stringify(snapshot);
+  assert.equal(buildStudioSteps(snapshot,cfg).find(s=>s.kind==='audio').input.voiceId,'george');
+  assert.equal(JSON.stringify(snapshot),before);
+ }
+ const snapshot={title:'Narration',characters:[{name:'Narrator',voicePreference:'sarah'}],scenes:[{...scene,audioMode:'narration',offscreenNarration:true}]};
+ assert.equal(buildStudioSteps(snapshot,cfg).find(s=>s.kind==='audio').input.voiceId,'sarah');
+ assert.equal(buildStudioSteps(snapshot,{...cfg,characterVoices:{Narrator:'adam'}}).find(s=>s.kind==='audio').input.voiceId,'adam');
+ assert.throws(()=>buildStudioSteps(snapshot,{...cfg,characterVoices:{Narrator:'Kore'}}),/Unsupported voice/);
+});
