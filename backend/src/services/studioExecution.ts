@@ -1,3 +1,4 @@
+import {StudioVideoReceipt} from '../models/StudioVideoReceipt.js';
 import {CreditApproval} from "../models/CreditApproval.js";
 import {CreditReservation} from "../models/CreditReservation.js";
 import { providerFor } from "./openrouter.js";
@@ -89,6 +90,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
     }
     for (const step of steps) {
       current = step;
+      if(step.kind==="video"&&!step.providerJobId){const receipt=await StudioVideoReceipt.findOne({productionId:production._id,userId:production.userId,stepKey:step.key,rejected:{$ne:true}}).lean();if(receipt){step.providerJobId=receipt.operationName;await checkpoint();}}
       if (step.status === "completed" || step.status === "skipped") continue;
       if(card&&!card.stepKeys.includes(step.key)){await awaitNextApproval();return;}
       if (step.kind === "audio" && step.input.track === "dialogue") {
@@ -138,6 +140,12 @@ export async function runStudioProduction(id: string, providers: StudioProviders
               input.referenceImages.push({ contentType: bytes.contentType, data: bytes.buffer.toString("base64") });
             }
           }
+          if(step.kind==='video')input.onVideoSubmitted=async(operationName:string)=>{
+            if(typeof operationName!=="string"||!operationName.trim())throw new Error("Provider did not return a video operation ID; review before retrying.");
+            // Record acceptance independently before later worker checkpoints.
+            step.providerJobId=operationName;
+            await StudioVideoReceipt.updateOne({productionId:production._id,stepKey:step.key},{$setOnInsert:{userId:production.userId,operationName,model:input.model}},{upsert:true});
+          };
           if (step.kind === "video" && !step.providerJobId) {
             const imageStep = steps.find(s => s.sceneId === step.sceneId && s.kind === "image" && s.status === "completed");
             if (!imageStep?.assetId) throw new Error("Scene image is not ready");
@@ -146,13 +154,14 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           }
           step.status = "requesting"; step.error = undefined;
           await checkpoint();
-          await studioLog(production, "processing", `${step.label}: ${step.providerJobId ? "resuming provider operation" : "generation submitted"} / billable, approved ceiling ${step.credits} credits`, step.key);
+          await studioLog(production, "processing", `${step.label}: ${step.providerJobId ? "resuming provider operation" : step.kind === "video" ? "submitting video request" : "generation submitted"} / billable, approved ceiling ${step.credits} credits`, step.key);
           if (step.kind === "image") {
             const outputs = await executeWithFallback(input,()=>providers.image(input)); output = outputs[0];
           } else if (step.kind === "audio") {
             const speech = await executeWithFallback(input,()=>providers.speech(input)); output = { ...speech, providerUsage: speech.providerData?.usage ?? speech.providerData?.usage_metadata };
           } else {
-            if (!step.providerJobId) { step.providerJobId = await providers.createVideo(input); await checkpoint(); }
+            if (!step.providerJobId) { const operationName=await providers.createVideo(input);await input.onVideoSubmitted(operationName);await checkpoint(); }
+            if(!step.providerJobId)throw new Error("Provider did not return a video operation ID; review before retrying.");
             const operation = await providers.pollVideo(step.providerJobId);
             const videos = await providers.downloadVideo(operation, { userId: String(production.userId), model: step.input.model,reservationId:String(production.reservationId) });
             const native = videos[0].metadata;
@@ -214,6 +223,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
   } catch (error: any) {
     if (lostLease) return;
     if (error.providerRejected && current?.kind === "video" && current.providerJobId) {
+      await StudioVideoReceipt.updateOne({productionId:production._id,stepKey:current.key,operationName:current.providerJobId},{$set:{rejected:true}});
       current.failedProviderJobIds = [...(current.failedProviderJobIds ?? []), current.providerJobId];
       current.providerJobId = undefined;
     }

@@ -16,6 +16,7 @@ function fail(message:string,statusCode=400):never{throw Object.assign(new Error
 const idSchema=z.string().regex(/^[a-f\d]{24}$/i,"Invalid ID");
 export async function prepareProduction(userId:string,body:unknown,allowDraftPlanning=false,agentTaskId?:string){
   const input = z.object({ projectId: idSchema, settings: studioSettingsSchema, sourceProductionId: idSchema.optional(), regenerateStepKey: z.string().max(150).optional() }).parse(body);
+  if(agentTaskId&&!input.sourceProductionId){const existing=await StudioProduction.findOne({userId,"snapshot.agentTaskId":agentTaskId});if(existing){if(String(existing.projectId)!==input.projectId)fail("This agent request already belongs to another project",409);return existing;}}
   const project = await AIProject.findOne({ _id: input.projectId, userId: userId }).lean();
   if (!project || !project.approvedAt && !allowDraftPlanning) fail("Approve the script before creating a production plan");
   const characters = await CharacterProfile.find({ projectId: project!._id, userId: userId }).lean();
@@ -33,7 +34,14 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
   if (input.sourceProductionId) {
     source = await StudioProduction.findOne({ _id: input.sourceProductionId, userId: userId, projectId: input.projectId });
     if (!source || !["completed", "cancelled", "failed", "needs_review", "paused"].includes(source.status) || source.leaseUntil > new Date()) fail("Pause production before regenerating an output");
-    snapshot = source.snapshot; settings = studioSettingsSchema.parse(source.settings);
+    snapshot = JSON.parse(JSON.stringify(source.snapshot));
+    // The originating agent request identifies one original production only.
+    // Preserve provenance without reusing that unique identity for regeneration.
+    const originTaskId=snapshot.agentTaskId||snapshot.sourceAgentTaskId;
+    delete snapshot.agentTaskId;
+    if(originTaskId)snapshot.sourceAgentTaskId=originTaskId;
+    if(agentTaskId&&agentTaskId!==originTaskId)snapshot.agentTaskId=agentTaskId;
+    settings = studioSettingsSchema.parse(source.settings);
   }
   if (snapshot.product) {
     if (!(await (await import("../services/creditPricingEngine.js")).getPricingPolicy()).values.commercialEnabled) fail("Product commercials are disabled by the administrator");
@@ -64,7 +72,9 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
     estimate.renderMode="ffmpeg-mp4";
   }
   const values={ userId: userId, projectId: input.projectId, sourceProductionId: source ? String(source._id) : undefined, title: project!.title, snapshot, settings, steps, estimate, expiresAt: new Date(Date.now() + 10 * 60000) };
-  const production=agentTaskId?await StudioProduction.findOneAndUpdate({userId,"snapshot.agentTaskId":agentTaskId},{$setOnInsert:values},{upsert:true,new:true}):await StudioProduction.create(values);
+  let production;
+  if(snapshot.agentTaskId){try{production=await StudioProduction.findOneAndUpdate({userId,"snapshot.agentTaskId":snapshot.agentTaskId},{$setOnInsert:values},{upsert:true,new:true});}catch(error:any){if(error.code!==11000)throw error;production=await StudioProduction.findOne({userId,projectId:input.projectId,"snapshot.agentTaskId":snapshot.agentTaskId});if(!production)throw error;}}
+  else production=await StudioProduction.create(values);
   await studioLog(production, "waiting", "Production plan prepared. Awaiting credit approval.");
   return production;
 }

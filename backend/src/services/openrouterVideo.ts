@@ -3,7 +3,7 @@ import { routerResponse, verifiedRouterModel, routerId, recordRouterUsage } from
 import { buildVeoPrompt } from "./sceneAudio.js";
 import { inspectNativeVideo } from "./nativeAudio.js";
 
-export async function createRouterVideo(settings: any) {
+async function routerVideoRequest(settings: any) {
   const record = await verifiedRouterModel(settings.model, "video");
   for (const [key, value] of [["supported_durations", settings.durationSeconds], ["supported_resolutions", String(settings.quality).toLowerCase()], ["supported_aspect_ratios", settings.aspectRatio]] as const) {
     if (!record[key]?.includes(value)) throw new Error(`OpenRouter video capability not verified: ${key}=${value}`);
@@ -13,9 +13,16 @@ export async function createRouterVideo(settings: any) {
   if (["alibaba/wan-3.0","kwaivgi/kling-v3.0-std"].includes(routerId(settings.model)) && (record.generate_audio !== true || !record.supported_frame_images?.includes("first_frame"))) throw new Error("Native audio and first-frame input are not verified for this model");
   const body: any = { model: routerId(settings.model), prompt: buildVeoPrompt(settings), duration: settings.durationSeconds, resolution: String(settings.quality).toLowerCase(), aspect_ratio: settings.aspectRatio, generate_audio: true };
   if (settings.sourceImageBytes) body.frame_images = [{ type: "image_url", frame_type: "first_frame", image_url: { url: `data:${settings.sourceImageMimeType || "image/png"};base64,${settings.sourceImageBytes}` } }];
+  return body;
+}
+export async function createRouterVideo(settings: any) {
+  let body;
+  try{body=await routerVideoRequest(settings);}catch(error:any){throw Object.assign(error,{providerRejected:true});}
   const response = await routerResponse("videos", body, 60000), data = await response.json();
   if (!/^[\w-]+$/.test(data.id || "")) throw new Error("OpenRouter did not return a valid video job ID; do not resubmit automatically");
-  return `openrouter:${data.id}`;
+  const operationName=`openrouter:${data.id}`;
+  if(settings.onVideoSubmitted)await settings.onVideoSubmitted(operationName);
+  return operationName;
 }
 export async function pollRouterVideo(operationName: string, timeout = 12 * 60000) {
   const id = operationName.slice("openrouter:".length); if (!/^[\w-]+$/.test(id)) throw new Error("Invalid OpenRouter video operation");

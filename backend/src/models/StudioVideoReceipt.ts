@@ -1,0 +1,2 @@
+import {Schema,model} from 'mongoose';
+const schema=new Schema({productionId:{type:Schema.Types.ObjectId,required:true},userId:{type:Schema.Types.ObjectId,required:true},stepKey:{type:String,required:true},operationName:{type:String,required:true},model:String,rejected:{type:Boolean,default:false}},{timestamps:true});schema.index({productionId:1,stepKey:1},{unique:true});export const StudioVideoReceipt=model('StudioVideoReceipt',schema);
