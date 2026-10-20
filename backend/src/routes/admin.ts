@@ -1,3 +1,4 @@
+import {verifyTurnstile} from '../services/turnstile.js';
 import { assetPackRouter } from "./assetPacks.js";
 import { adminOperationsRouter } from "./adminOperations.js";
 import { GatewayBinding, GatewayUsage, isOpenRouter, providerFor, verifiedRouterModel } from "../services/openrouter.js";
@@ -41,6 +42,7 @@ const secure = () => env.APP_URL.startsWith("https:");
 const audit = (req: any, action: string, target: string, why: string, before: any, after: any, session?: any) => AdminAudit.create([{ actorId: req.adminUser._id, action, target, reason: why, before, after }], { session });
 adminRouter.get("/login-options", (_req, res) => res.json({ method: env.ADMIN_LOGIN_METHOD }));
 adminRouter.post("/login", rateLimit({ windowMs: 15 * 60000, limit: 8, standardHeaders: true, legacyHeaders: false }), wrap(async (req: any, res: any) => {
+  await verifyTurnstile(req.body?.turnstileToken,"admin_login",req.ip);
   const input = z.object({ email: z.string().email().transform(v => v.toLowerCase()), password: z.string().min(1).max(200), code: z.string().default(""), challengeId: z.string().max(100).optional() }).parse(req.body);
   const user = await User.findOne({ email: input.email, role: "admin", status: "active" }).select("+passwordHash");
   if (!user || !await verifyPassword(user.passwordHash, input.password)) return res.status(401).json({ error: "Invalid administrator credentials" });
@@ -69,12 +71,12 @@ adminRouter.post("/login", rateLimit({ windowMs: 15 * 60000, limit: 8, standardH
   }
   const token = randomToken(32), csrf = randomToken(24); await AdminSession.create({ userId: user._id, tokenHash: hashSecret(token), csrfHash: hashSecret(csrf), expiresAt: new Date(Date.now() + 4 * 3600000) });
   await AdminAudit.create({ actorId: user._id, action: "admin-login", target: String(user._id), reason: "Password and " + env.ADMIN_LOGIN_METHOD + " verification completed" });
-  res.cookie("drex_admin", token, { httpOnly: true, sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/api" }); res.cookie("drex_admin_csrf", csrf, { sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/" }); res.json({ user: { id: user._id, displayName: user.displayName, email: user.email }, csrf });
+  res.clearCookie("drex_admin",{path:"/api"});res.cookie("drex_admin", token, { httpOnly: true, sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/" }); res.cookie("drex_admin_csrf", csrf, { sameSite: "strict", secure: secure(), maxAge: 4 * 3600000, path: "/" }); res.json({ user: { id: user._id, displayName: user.displayName, email: user.email }, csrf });
 }));
 adminRouter.use(requireAdmin);
 adminRouter.use(assetPackRouter);
 adminRouter.get("/me", (req: any, res) => res.json({ user: req.adminUser }));
-adminRouter.post("/logout", wrap(async (req: any, res: any) => { await AdminSession.updateOne({ _id: req.adminSession._id }, { revokedAt: new Date() }); res.clearCookie("drex_admin", { path: "/api" }); res.clearCookie("drex_admin_csrf", { path: "/" }); res.json({ ok: true }); }));
+adminRouter.post("/logout", wrap(async (req: any, res: any) => { await AdminSession.updateOne({ _id: req.adminSession._id }, { revokedAt: new Date() }); res.clearCookie("drex_admin", { path: "/api" });res.clearCookie("drex_admin",{path:"/"}); res.clearCookie("drex_admin_csrf", { path: "/" }); res.json({ ok: true }); }));
 adminRouter.get("/overview", wrap(async (req: any, res: any) => { const input = z.object({ start: z.string().date(), end: z.string().date() }).parse(req.query); const start = new Date(input.start), end = new Date(`${input.end}T23:59:59.999Z`); if (end < start || end.getTime() - start.getTime() > 366 * 86400000) return res.status(400).json({ error: "Choose a date range of up to one year." }); res.json(await overview(start, end)); }));
 adminRouter.get("/users", wrap(async (req: any, res: any) => { const input = z.object({ search: z.string().max(100).default(""), before: id.optional() }).parse(req.query); const escaped = input.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); const users = await User.find({ ...(escaped ? { $or: [{ email: { $regex: escaped, $options: "i" } }, { displayName: { $regex: escaped, $options: "i" } }] } : {}), ...(input.before ? { _id: { $lt: input.before } } : {}) }).select("displayName email role status aiRestricted createdAt lastLoginAt").sort({ _id: -1 }).limit(51); res.json({ users: users.slice(0, 50), next: users.length > 50 ? String(users[49]._id) : null }); }));
 adminRouter.get("/users/:id", wrap(async (req: any, res: any) => { const userId = id.parse(req.params.id), user = await User.findById(userId).select("displayName email role status aiRestricted createdAt lastLoginAt"); if (!user) return res.status(404).json({ error: "User not found" }); const [wallet, ledger, support, feedback, payments, jobs] = await Promise.all([Wallet.findOne({ userId }), LedgerEntry.find({ userId }).sort({ createdAt: -1 }).limit(100), SupportTicket.find({ userId }).sort({ updatedAt: -1 }).limit(50), Feedback.find({ userId }).sort({ createdAt: -1 }).limit(50), Payment.find({ userId }).select("txRef amount currency credits status createdAt").sort({ createdAt: -1 }).limit(100), Promise.all(Object.entries(jobModels).map(async ([kind, model]) => ({ kind, jobs: await model.find({ userId }).select("status model createdAt error").sort({ createdAt: -1 }).limit(30) })))]); res.json({ user, wallet, ledger, support, feedback, payments, jobs }); }));

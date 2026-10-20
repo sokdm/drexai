@@ -5,6 +5,9 @@ dotenv.config();
 dotenv.config({ path: "../.env", override: false });
 
 const envSchema = z.object({
+  TURNSTILE_ENABLED:z.preprocess(v=>v===true||v==='true',z.boolean()).default(false),
+  TURNSTILE_SITE_KEY:z.string().optional(),TURNSTILE_SECRET_KEY:z.string().optional(),
+
   OPENROUTER_MANAGEMENT_KEY: z.preprocess(v => v === "" ? undefined : v, z.string().min(1).optional()),
   OPENROUTER_API_KEY: z.preprocess(v => v === "" ? undefined : v, z.string().min(1).optional()),
   OPENROUTER_TEXT_FALLBACK_MODEL: z.string().default("openai/gpt-4.1-mini"),

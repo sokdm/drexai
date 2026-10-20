@@ -1,3 +1,4 @@
+import {TurnstileChallenge} from '../../components/TurnstileChallenge';
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { brand } from "@drex/shared";
@@ -21,6 +22,7 @@ const countries = ["Nigeria", "United States", "United Kingdom", "Ghana", "Kenya
 export function AuthPage({ mode }: { mode: keyof typeof copy }) {
   const params = new URLSearchParams(location.search);
   const [form, setForm] = useState<Record<string, string | boolean>>({ email: params.get("email") ?? "", country: "Nigeria", termsAccepted: false });
+  const [securityToken,setSecurityToken]=useState(''),[securityAttempt,setSecurityAttempt]=useState(0);
   const [signupStep, setSignupStep] = useState(1);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -43,21 +45,21 @@ export function AuthPage({ mode }: { mode: keyof typeof copy }) {
     setMessage("");
     try {
       if (mode === "signup") {
-        await api("/api/auth/register", { method: "POST", body: JSON.stringify(form) });
+        await api("/api/auth/register", { method: "POST", body: JSON.stringify({...form,turnstileToken:securityToken}) });
         navigate(`/verify-email?email=${encodeURIComponent(String(form.email ?? ""))}`);
       } else if (mode === "verify") {
-        const data = await api<{ user: User }>("/api/auth/verify-email", { method: "POST", body: JSON.stringify(form) });
+        const data = await api<{ user: User }>("/api/auth/verify-email", { method: "POST", body: JSON.stringify({...form,turnstileToken:securityToken}) });
         setUser(data.user);
         navigate("/dashboard");
       } else if (mode === "login") {
-        const data = await api<{ user: User }>("/api/auth/login", { method: "POST", body: JSON.stringify(form) });
+        const data = await api<{ user: User }>("/api/auth/login", { method: "POST", body: JSON.stringify({...form,turnstileToken:securityToken}) });
         setUser(data.user);
         navigate("/dashboard");
       } else if (mode === "forgot") {
-        const data = await api<{ message: string }>("/api/auth/forgot-password", { method: "POST", body: JSON.stringify(form) });
+        const data = await api<{ message: string }>("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({...form,turnstileToken:securityToken}) });
         setMessage(`${data.message} Go to Reset Password when you receive the code.`);
       } else if (mode === "reset") {
-        const data = await api<{ message: string }>("/api/auth/reset-password", { method: "POST", body: JSON.stringify(form) });
+        const data = await api<{ message: string }>("/api/auth/reset-password", { method: "POST", body: JSON.stringify({...form,turnstileToken:securityToken}) });
         setMessage(data.message);
         setTimeout(() => navigate("/login"), 900);
       }
@@ -66,7 +68,7 @@ export function AuthPage({ mode }: { mode: keyof typeof copy }) {
       if (text.toLowerCase().includes("verification")) navigate(`/verify-email?email=${encodeURIComponent(String(form.email ?? ""))}`);
       else setError(text);
     } finally {
-      setLoading(false);
+      setLoading(false);setSecurityToken('');setSecurityAttempt(n=>n+1);
     }
   }
 
@@ -92,6 +94,7 @@ export function AuthPage({ mode }: { mode: keyof typeof copy }) {
               {mode === "verify" && <OtpFields form={form} set={set} resend={() => resend(form.email, setMessage, setError)} />}
               {mode === "forgot" && <Field label="Email" type="email" value={String(form.email ?? "")} onChange={(value) => set("email", value)} />}
               {mode === "reset" && <><Field label="Email" type="email" value={String(form.email ?? "")} onChange={(value) => set("email", value)} /><Field label="Reset code" value={String(form.code ?? "")} onChange={(value) => set("code", value)} /><Field label="New password" type="password" value={String(form.password ?? "")} onChange={(value) => set("password", value)} /><Field label="Confirm password" type="password" value={String(form.confirmPassword ?? "")} onChange={(value) => set("confirmPassword", value)} /></>}
+              {(mode==="login"||mode==="signup"&&signupStep===2)&&<TurnstileChallenge key={securityAttempt} action={mode==="signup"?"signup":"login"} onToken={setSecurityToken}/>}
               {error && <p className="rounded-md bg-red-50 p-3 text-sm font-semibold text-red-700 dark:bg-red-950 dark:text-red-200">{error}</p>}
               {message && <p className="rounded-md bg-emerald-50 p-3 text-sm font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">{message}</p>}
               <div className="flex gap-2">

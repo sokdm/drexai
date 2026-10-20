@@ -1,3 +1,4 @@
+import {supportAssistantReply,requestSupportAgent} from '../services/supportAssistant.js';
 import express, { Router } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
@@ -25,6 +26,7 @@ async function addMessage(req: any, ticket: any, input: z.infer<typeof messageIn
   const existing = await SupportMessage.findOne({ ticketId: ticket._id, senderId: req.user._id, requestId: input.requestId }).session(session); if (existing) return existing;
   const [message] = await SupportMessage.create([{ ticketId: ticket._id, senderId: req.user._id, senderName: req.user.displayName, senderRole: req.user.role, ...input, ...(isSupport(req.user) ? { readBySupportAt: new Date() } : { readByUserAt: new Date() }) }], { session });
   for (const attachmentId of input.attachments) { const attachment = await SupportAttachment.findOneAndUpdate({ _id: attachmentId, userId: req.user._id, messageId: { $exists: false }, expiresAt: { $gt: new Date() } }, { $set: { ticketId: ticket._id, messageId: message._id }, $unset: { expiresAt: 1 } }, { new: true, session }); if (!attachment) fail("An attachment is unavailable. Upload it again."); }
+  if(isSupport(req.user))ticket.supportStage="agent";
   ticket.lastMessageAt = new Date(); ticket.status = isSupport(req.user) ? "waiting" : "open"; ticket.revision++; await ticket.save({ session });
   if (isSupport(req.user) && String(ticket.userId) !== String(req.user._id)) {
     await notify({ userId: ticket.userId, eventKey: `support-reply:${message._id}`, type: "support", title: "Support replied", content: ticket.subject, href: `/dashboard/support?ticket=${ticket._id}` }, session);
@@ -42,11 +44,11 @@ supportRouter.get("/tickets", wrap(async (req: any, res: any) => {
   const tickets = await SupportTicket.find(query).sort({ _id: -1 }).limit(31).populate("assignedTo", "displayName"); res.json({ tickets: tickets.slice(0, 30), next: tickets.length > 30 ? String(tickets[29]._id) : null });
 }));
 supportRouter.post("/tickets", rateLimit({ windowMs: 3600000, limit: 15 }), wrap(async (req: any, res: any) => {
-  const input = messageInput.extend({ subject: z.string().trim().min(3).max(150), category: z.enum(supportCategories) }).parse(req.body);
+  const input = messageInput.extend({ channel:z.enum(["ticket","chat"]).default("ticket"),subject: z.string().trim().min(3).max(150), category: z.enum(supportCategories) }).parse(req.body);
   let ticket: any; const session = await mongoose.startSession();
   try { await session.withTransaction(async () => {
     ticket = await SupportTicket.findOne({ userId: req.user._id, requestId: input.requestId }).session(session); if (ticket) return;
-    [ticket] = await SupportTicket.create([{ userId: req.user._id, requestId: input.requestId, subject: input.subject, category: input.category, history: [{ actorId: req.user._id, action: "Ticket opened" }] }], { session });
+    [ticket] = await SupportTicket.create([{ userId: req.user._id, requestId: input.requestId, subject: input.subject, category: input.category,channel:input.channel,supportStage:input.channel==="chat"?"bot":"agent", history: [{ actorId: req.user._id, action: "Ticket opened" }] }], { session });
     await addMessage(req, ticket, input, session); await queueSupportEmail(req.user._id, ticket._id, `ticket:${ticket._id}`, "Your Drex support ticket is open", `We received your support request: ${ticket.subject}.`, session);
   }); } finally { await session.endSession(); }
   emitSupportEvent(String(ticket.userId), String(ticket._id)); res.status(201).json({ ticket });
@@ -61,6 +63,8 @@ supportRouter.post("/tickets/:id/messages", rateLimit({ windowMs: 60000, limit: 
   try { await session.withTransaction(async () => { ticket = await ownTicket(req, session); const existing = await SupportMessage.findOne({ ticketId: ticket._id, senderId: req.user._id, requestId: input.requestId }).session(session); if (existing) { message = existing; return; } if (["resolved", "closed"].includes(ticket.status)) fail("Reopen this ticket before sending another message.", 409); message = await addMessage(req, ticket, input, session); }); } finally { await session.endSession(); }
   emitSupportEvent(String(ticket.userId), String(ticket._id)); emitUserEvent(String(ticket.userId), "notifications:changed", {}); res.status(201).json({ message });
 }));
+supportRouter.post('/tickets/:id/assistant',rateLimit({windowMs:60000,limit:10}),wrap(async(req:any,res:any)=>{res.json(await supportAssistantReply(String(req.user._id),id.parse(req.params.id),requestId.parse(req.body.requestId)));}));
+supportRouter.post('/tickets/:id/handoff',rateLimit({windowMs:3600000,limit:10}),wrap(async(req:any,res:any)=>{res.json(await requestSupportAgent(String(req.user._id),id.parse(req.params.id)));}));
 supportRouter.post("/tickets/:id/read", wrap(async (req: any, res: any) => { const ticket = await ownTicket(req), through = id.parse(req.body.through), field = isSupport(req.user) ? "readBySupportAt" : "readByUserAt"; const result = await SupportMessage.updateMany({ ticketId: ticket._id, _id: { $lte: through }, [field]: null }, { $set: { [field]: new Date() } }); if (result.modifiedCount) emitSupportEvent(String(ticket.userId), String(ticket._id)); res.json({ ok: true }); }));
 supportRouter.patch("/tickets/:id", requireSupport, wrap(async (req: any, res: any) => {
   const input = z.object({ revision: z.number().int().nonnegative(), status: z.enum(["open", "waiting", "resolved", "closed"]).optional(), priority: z.enum(["low", "normal", "high", "urgent"]).optional(), assignedTo: id.nullable().optional() }).parse(req.body);

@@ -43,7 +43,7 @@ import { setRealtimeServer } from "./realtime.js";
 
 const app = express();
 app.set("trust proxy", 1);
-app.use(helmet({ contentSecurityPolicy: { directives: { "script-src": ["'self'", "https://www.youtube.com", "https://s.ytimg.com"], "frame-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com"], "img-src": ["'self'", "data:", "blob:", "https:"], "media-src": ["'self'", "data:", "blob:", "https:"], "connect-src": ["'self'", "https:", "wss:", ...(env.SERVE_FRONTEND ? [] : ["http://localhost:*", "ws://localhost:*"])] } } }));
+app.use(helmet({ contentSecurityPolicy: { directives: { "script-src": ["'self'", "https://challenges.cloudflare.com", "https://www.youtube.com", "https://s.ytimg.com"], "frame-src": ["'self'", "https://challenges.cloudflare.com", "https://www.youtube.com", "https://www.youtube-nocookie.com"], "img-src": ["'self'", "data:", "blob:", "https:"], "media-src": ["'self'", "data:", "blob:", "https:"], "connect-src": ["'self'", "https:", "wss:", ...(env.SERVE_FRONTEND ? [] : ["http://localhost:*", "ws://localhost:*"])] } } }));
 app.use(cors({ origin: env.CLIENT_ORIGIN, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));

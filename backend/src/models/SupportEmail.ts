@@ -1,6 +1,7 @@
 import { Schema, model } from "mongoose";
 const schema = new Schema({
   eventKey: { type: String, required: true, unique: true }, userId: { type: Schema.Types.ObjectId, required: true },
+  adminAlert:{type:Boolean,default:false},
   ticketId: Schema.Types.ObjectId, subject: String, text: String,
   status: { type: String, enum: ["pending", "sending", "sent", "skipped", "failed"], default: "pending", index: true },
   attempts: { type: Number, default: 0 }, nextAttemptAt: { type: Date, default: Date.now }, leaseUntil: Date,

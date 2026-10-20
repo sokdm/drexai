@@ -1,6 +1,7 @@
 import { Schema, model } from "mongoose";
 export const supportCategories = ["Payment issue", "Missing credits", "AI generation issue", "Account issue", "YouTube connection problem", "Video rendering issue", "Technical bug", "General inquiry"] as const;
 const schema = new Schema({
+  channel:{type:String,enum:['ticket','chat'],default:'ticket'},supportStage:{type:String,enum:['bot','waiting_agent','agent'],default:'agent'},botLeaseUntil:Date,
   userId: { type: Schema.Types.ObjectId, required: true, index: true }, requestId: { type: String, required: true },
   category: { type: String, enum: supportCategories, required: true }, subject: { type: String, required: true },
   status: { type: String, enum: ["open", "waiting", "resolved", "closed"], default: "open" },

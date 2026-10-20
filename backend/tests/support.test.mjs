@@ -1,3 +1,4 @@
+import {AdminSession} from '../dist/models/Admin.js';
 import argon2 from "argon2";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -138,3 +139,5 @@ test("feedback stores ratings, protects admin review and hides internal notes fr
   assert.equal((await request("/feedback", "user", jsonPost({ ...input, requestId: randomUUID(), rating: 7 }))).status, 400);
   assert.equal((await request("/feedback", "user", { ...jsonPost(input), headers: { "x-csrf-token": "wrong" } })).status, 403);
 });
+
+test('separate administrator sessions authenticate live support sockets and reject forged CSRF',async()=>{await AdminSession.create({userId:admin._id,tokenHash:hashSecret('admin-live'),csrfHash:hashSecret('admin-live-csrf'),expiresAt:new Date(Date.now()+60000)});const connect=csrf=>client(base,{transports:['websocket'],extraHeaders:{Origin:env.CLIENT_ORIGIN,Cookie:'drex_admin=admin-live'},auth:{scope:'admin',csrf},forceNew:true,reconnection:false});const good=connect('admin-live-csrf');try{await new Promise((resolve,reject)=>{good.once('connect',resolve);good.once('connect_error',reject);});const bad=connect('forged');try{await new Promise((resolve,reject)=>{bad.once('connect_error',resolve);bad.once('connect',()=>reject(Error('Forged CSRF accepted')));});}finally{bad.disconnect();}}finally{good.disconnect();}});

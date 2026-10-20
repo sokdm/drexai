@@ -1,3 +1,4 @@
+import {AdminSession} from './models/Admin.js';
 import type { Server, Socket } from "socket.io";
 import { Session } from "./models/Session.js";
 import { User } from "./models/User.js";
@@ -6,6 +7,7 @@ import { hashSecret } from "./utils/crypto.js";
 import { env } from "./config/env.js";
 let ioRef: Server | null = null;
 async function identity(socket: Socket) {
+  if(socket.handshake.auth?.scope==='admin'){const raw=socket.handshake.headers.cookie?.split(';').map(s=>s.trim()).find(s=>s.startsWith('drex_admin='))?.slice(11);if(!raw||typeof socket.handshake.auth?.csrf!=='string')return null;const session=await AdminSession.findOne({tokenHash:hashSecret(decodeURIComponent(raw)),revokedAt:null,expiresAt:{$gt:new Date()}});if(!session||hashSecret(socket.handshake.auth.csrf)!==session.csrfHash)return null;const admin=await User.findOne({_id:session.userId,role:'admin',status:'active'});return admin;}
   const raw = socket.handshake.headers.cookie?.split(";").map(s => s.trim()).find(s => s.startsWith("drex_session="))?.slice(13);
   if (!raw) return null;
   const session = await Session.findOne({ tokenHash: hashSecret(decodeURIComponent(raw)), revokedAt: null, expiresAt: { $gt: new Date() } });

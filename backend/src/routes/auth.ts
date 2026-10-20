@@ -1,3 +1,4 @@
+import {turnstileConfig,turnstileGuard} from '../services/turnstile.js';
 import { verifyPassword } from "../utils/password.js";
 import { notify } from "../services/notifications.js";
 import argon2 from "argon2";
@@ -29,6 +30,7 @@ const registerSchema = z.object({
   password: passwordSchema,
   confirmPassword: z.string()
 }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Passwords do not match" });
+authRouter.get("/security",(_req,res)=>res.json(turnstileConfig()));
 const loginSchema = z.object({ email: emailSchema, password: z.string().min(1) });
 const otpSchema = z.object({ email: emailSchema, code: z.string().length(6) });
 const resetSchema = z.object({ email: emailSchema, code: z.string().length(6), password: passwordSchema, confirmPassword: z.string() }).refine((data) => data.password === data.confirmPassword, { path: ["confirmPassword"], message: "Passwords do not match" });
@@ -80,7 +82,7 @@ async function issueSession(user: any, req: any, res: any) {
 
 authRouter.use(authLimiter);
 
-authRouter.post("/register", strictLimiter, async (req, res, next) => {
+authRouter.post("/register", strictLimiter,turnstileGuard("signup"), async (req, res, next) => {
   try {
     const input = registerSchema.parse(req.body);
     const existing = await User.findOne({ email: input.email });
@@ -138,7 +140,7 @@ authRouter.post("/resend-verification", strictLimiter, async (req, res, next) =>
   }
 });
 
-authRouter.post("/login", strictLimiter, async (req, res, next) => {
+authRouter.post("/login", strictLimiter,turnstileGuard("login"), async (req, res, next) => {
   try {
     const input = loginSchema.parse(req.body);
     const user = await User.findOne({ email: input.email });

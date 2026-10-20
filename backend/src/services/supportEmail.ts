@@ -3,8 +3,8 @@ import { SupportEmail } from "../models/SupportEmail.js";
 import { User } from "../models/User.js";
 import { env } from "../config/env.js";
 
-export async function queueSupportEmail(userId: any, ticketId: any, eventKey: string, subject: string, text: string, session?: any) {
-  await SupportEmail.updateOne({ eventKey }, { $setOnInsert: { userId, ticketId, eventKey, subject, text: `${text}\n\nView your conversation: ${env.APP_URL}/dashboard/support?ticket=${ticketId}` } }, { upsert: true, session });
+export async function queueSupportEmail(userId: any, ticketId: any, eventKey: string, subject: string, text: string, session?: any, adminAlert=false, portal:"admin"|"support"="admin") {
+  await SupportEmail.updateOne({ eventKey }, { $setOnInsert: { userId, ticketId, eventKey, subject, adminAlert, text: `${text}\n\nView your conversation: ${env.APP_URL}/${adminAlert?(portal==="admin"?"admin?section=Support&":"dashboard/support?view=admin&"):"dashboard/support?"}ticket=${ticketId}` } }, { upsert: true, session });
 }
 export async function deliverSupportEmails() {
   // No development fake-success delivery. Missing configuration leaves durable mail pending.
@@ -17,7 +17,7 @@ export async function deliverSupportEmails() {
     // Resend retains idempotency keys for 24h. Do not automatically retry uncertain deliveries beyond that window.
     if (mail.firstAttemptAt && Date.now() - mail.firstAttemptAt.getTime() > 23 * 3600000) { mail.status = "failed"; mail.error = "Delivery needs manual review after the safe retry window."; await mail.save(); continue; }
     const user = await User.findById(mail.userId);
-    if (!user || user.preferences?.supportEmails === false) { mail.status = "skipped"; await mail.save(); continue; }
+    if (!user || mail.adminAlert&&!(["admin","support"].includes(user.role)&&user.status==="active") || !mail.adminAlert&&user.preferences?.supportEmails === false) { mail.status = "skipped"; await mail.save(); continue; }
     if (!mail.firstAttemptAt) { mail.firstAttemptAt = now; await mail.save(); }
     try {
       const delivery = await sendTransactionalEmail(user.email, mail.subject || "Support update", mail.text || "View your support conversation in Drex.", 'drex-support-' + mail._id);
