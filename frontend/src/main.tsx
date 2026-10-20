@@ -1,3 +1,4 @@
+import {CharacterAnimatorPage} from './pages/dashboard/CharacterAnimatorPage';
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { AdminPage } from "./pages/AdminPage";
 import { PlatformStatus } from "./components/PlatformStatus";
@@ -69,6 +70,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="video-editor" element={<VideoEditorPage />} />
             <Route path="text-to-image" element={<TextToImagePage />} />
             <Route path="image-to-video" element={<ImageToVideoPage />} />
+            <Route path="character-animator" element={<CharacterAnimatorPage />} />
             <Route path="voice-studio" element={<VoiceStudioPage />} />
             <Route path="credit-wallet" element={<WalletPage />} />
             <Route path="wallet" element={<Navigate to="/dashboard/credit-wallet" replace />} />

@@ -1,3 +1,4 @@
+import {AnimatorWorkspace} from '../models/AnimatorWorkspace.js';
 import {admitChatMessage,publicChatError} from "../services/chatAccess.js";
 import {ensureProductionEdit} from "../services/sharedEditing.js";
 import {executeTimelineTool} from "../services/editorToolExecution.js";
@@ -24,7 +25,7 @@ import { MediaAsset } from "../models/MediaAsset.js";
 import { uploadImage, uploadVideo, persistentStorageConfigured, signedImageUrl, openMediaStream } from "../services/mediaStorage.js";
 import { roughCut, validateTimelineAssets, editorFail, editorAssetUrl, uploadEditorAudio, editingSuggestions, captionsFromTranscript } from "../services/videoEditing.js";
 import { env } from "../config/env.js";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { editorAssetBytes } from "../services/videoEditing.js";
@@ -44,6 +45,18 @@ async function readiness() {
   const worker = await RenderWorker.findOne({ _id: { $in: ["ffmpeg", "ffmpeg-web"] }, expiresAt: { $gt: new Date() } }).lean();
   return { queueEnabled: env.RENDER_QUEUE_ENABLED, storageConfigured: persistentStorageConfigured(), workerOnline: Boolean(worker), capabilities: worker?.capabilities ?? { resolutions: ["480p", "720p", "1080p"], formats: ["mp4"] } };
 }
+// Animator preparation shares owned editor assets and projects. Paid processing is
+// unavailable until a verified streaming adapter and USD pricing are configured.
+editorRouter.get('/animator/workspace',wrap(async(req,res)=>{
+ const workspace=await AnimatorWorkspace.findOne({userId:req.user._id}).lean();
+ res.json({workspace,storageConfigured:persistentStorageConfigured(),provider:{name:'Xmax X2.0',liveAvailable:false,voiceConversionAvailable:false,creditsPerSecond:null,reason:'Live animation needs a verified Xmax connection and USD pricing. Camera capture and input recording are available without AI processing.',documentation:'https://platform.xmax.ai/docs/capabilities/realtime-video/sdk-reference'}});
+}));
+editorRouter.put('/animator/workspace',wrap(async(req,res)=>{
+ const input=z.object({editId:idSchema.optional(),characterAssetId:idSchema.optional(),referenceAudioAssetId:idSchema.optional(),aspectRatio:z.enum(['9:16','16:9','1:1']),microphone:z.boolean()}).parse(req.body);
+ if(input.editId&&!await VideoEdit.exists({_id:input.editId,userId:req.user._id}))editorFail('Edit not found',404);
+ for(const [key,type] of [['characterAssetId','image'],['referenceAudioAssetId','audio']] as const){if(input[key]&&!await MediaAsset.exists({_id:input[key],userId:req.user._id,type,deletedAt:null}))editorFail('Media not found',404);}
+ const workspace=await AnimatorWorkspace.findOneAndUpdate({userId:req.user._id},{$set:input},{upsert:true,new:true});res.json({workspace});
+}));
 editorRouter.get("/config", wrap(async (req, res) => {
   const productions = await StudioProduction.find({ userId: req.user._id, "timeline.0": { $exists: true } }).select("title status projectId createdAt").sort({ updatedAt: -1 }).limit(100).lean();
   const edits = await VideoEdit.find({ userId: req.user._id }).select("title productionId projectId revision updatedAt").sort({ updatedAt: -1 }).limit(100).lean();
@@ -165,10 +178,13 @@ editorRouter.post("/edits/:id/visual", raw({type:["image/png","image/jpeg","imag
   asset=await MediaAsset.create({userId:req.user._id,projectId:edit.projectId,provider:"upload",type:"image",...stored,width:info.width,height:info.height,sizeBytes:bytes.length,contentType:"image/png",metadata:{name,licenseConfirmed:true}});
  }else{
   const directory=await mkdtemp(path.join(tmpdir(),"drex-upload-"));
-  try{const file=path.join(directory,"source");await writeFile(file,req.body);const info=await probeMedia(file);
+  try{const file=path.join(directory,"source");await writeFile(file,req.body);let info=await probeMedia(file),bytes=req.body;
+   // Browser MediaRecorder WebM often omits the container duration. Remux locally
+   // before validation/storage so the saved asset has a measured, seekable duration.
+   if(contentType==='video/webm'&&info.video&&!info.duration){const normalized=path.join(directory,'recording.webm');await runMedia('ffmpeg',['-v','error','-protocol_whitelist','file,pipe','-i',file,'-map','0:v:0','-map','0:a?','-c','copy',normalized],{timeoutMs:60000});info=await probeMedia(normalized);bytes=await readFile(normalized);}
    if(!info.video||!info.duration||info.duration>3600||info.width>7680||info.height>7680)editorFail("Upload a readable video up to one hour and 7680 pixels per side");
-   const stored=await uploadVideo(req.body,String(req.user._id)+"/editor/"+randomUUID(),contentType);
-   asset=await MediaAsset.create({userId:req.user._id,projectId:edit.projectId,provider:"upload",type:"video",...stored,width:info.width,height:info.height,durationSeconds:info.duration,sizeBytes:req.body.length,contentType,metadata:{name,licenseConfirmed:true}});
+   const stored=await uploadVideo(bytes,String(req.user._id)+"/editor/"+randomUUID(),contentType);
+   asset=await MediaAsset.create({userId:req.user._id,projectId:edit.projectId,provider:"upload",type:"video",...stored,width:info.width,height:info.height,durationSeconds:info.duration,sizeBytes:bytes.length,contentType,metadata:{name,licenseConfirmed:true}});
   }finally{await rm(directory,{recursive:true,force:true});}
  }
  res.status(201).json({asset:publicAsset(asset.toObject())});
