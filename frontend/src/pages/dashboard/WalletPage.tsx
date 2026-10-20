@@ -1,4 +1,4 @@
-import {formatPackagePrice} from "../../lib/money";
+import {formatPackagePrice,formatCreditRate} from "../../lib/money";
 import { useRealtime } from "../../lib/realtime";
 import { useEffect, useState } from "react";
 import { Coins, ReceiptText, ShieldCheck } from "lucide-react";
@@ -57,8 +57,8 @@ export function WalletPage() {
         {error && <p className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700 dark:bg-red-950 dark:text-red-200">{error}</p>}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {data?.packages?.map((pkg: any) => <div className="rounded-md border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900" key={pkg._id}><h3 className="text-xl font-black">{pkg.name}</h3><p className="mt-3 text-4xl font-black">{formatPackagePrice(pkg.amount,pkg.currency)}</p><p className="mt-2 text-slate-600 dark:text-slate-300">{pkg.credits.toLocaleString()} credits</p>{pkg.promotion && <p className="mt-2 text-sm">{pkg.promotion}</p>}<Button className="mt-6" onClick={() => buy(pkg._id)}>Buy Credits</Button></div>)}
+      <section className="grid gap-4 md:grid-cols-2">
+        {data?.packages?.map((pkg: any) => <div className="rounded-3xl border border-line bg-white p-6 dark:border-slate-800 dark:bg-slate-900" key={pkg._id}><h3 className="text-xl font-black">{pkg.name}</h3><p className="mt-3 text-4xl font-black">{formatPackagePrice(pkg.amount,pkg.currency)}</p><p className="mt-6 text-3xl font-bold">{pkg.credits.toLocaleString()}</p><p className="mt-1 text-slate-600 dark:text-slate-300">credits</p><p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{formatCreditRate(pkg.amount,pkg.credits,pkg.currency)} per credit</p>{pkg.promotion && <p className="mt-6 border-t border-line pt-4 dark:border-slate-700">{pkg.promotion}</p>}<Button className="mt-6" onClick={() => buy(pkg._id)}>Buy Credits</Button></div>)}
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">

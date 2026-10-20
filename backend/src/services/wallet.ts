@@ -12,9 +12,8 @@ import { LedgerEntry } from "../models/LedgerEntry.js";
 import { Wallet } from "../models/Wallet.js";
 
 export async function seedCreditConfig() {
-  await CreditPackage.updateOne({ key: "starter" }, { $setOnInsert: { key: "starter", name: "Starter", credits: 1000, amount: 20, currency: "USD", sortOrder: 1, active: true } }, { upsert: true });
-  await CreditPackage.updateOne({ key: "creator" }, { $setOnInsert: { key: "creator", name: "Creator", credits: 5000, amount: 80, currency: "USD", sortOrder: 2, active: true } }, { upsert: true });
-  await CreditPackage.updateOne({ key: "mini" }, { $setOnInsert: { key: "mini", name: "Mini", credits: 500, amount: 10, currency: "USD", sortOrder: 0, active: true } }, { upsert: true });
+  const referencePackages=[{key:'mini',name:'Mini',credits:500,amount:12,sortOrder:0,promotion:'Occasional use'},{key:'starter',name:'Starter',credits:2000,amount:42,sortOrder:1,promotion:'Growing creators'},{key:'plus',name:'Plus',credits:5000,amount:90,sortOrder:2,promotion:'Regular production'},{key:'creator',name:'Creator',credits:12000,amount:192,sortOrder:3,promotion:'Best credit value'}];
+  for(const pkg of referencePackages)await CreditPackage.updateOne({key:pkg.key},{$setOnInsert:{...pkg,currency:'USD',active:true}},{upsert:true});
   const migrationSession = await mongoose.startSession();
   try { await migrationSession.withTransaction(async () => {
     if (await AppMigration.findById("credit-packages-20261016").session(migrationSession)) return;
@@ -25,6 +24,7 @@ export async function seedCreditConfig() {
     await AppMigration.create([{ _id: "credit-packages-20261016", appliedAt: new Date() }], { session: migrationSession });
   }); } finally { await migrationSession.endSession(); }
   const creatorSession=await mongoose.startSession();try{await creatorSession.withTransaction(async()=>{if(await AppMigration.findById('creator-value-20261020').session(creatorSession))return;const old=await CreditPackage.findOneAndUpdate({key:'creator',credits:5000,amount:90,currency:'USD',promotion:{$in:['',null]}},{$set:{amount:80}},{session:creatorSession});if(old)await AdminAudit.create([{action:'creator-package-value-update',target:'creator',reason:'Owner requested Creator credits valued at 0.016 USD each',before:{amount:90,credits:5000},after:{amount:80,credits:5000}}],{session:creatorSession});await AppMigration.create([{_id:'creator-value-20261020',appliedAt:new Date()}],{session:creatorSession});});}finally{await creatorSession.endSession();}
+  const referenceSession=await mongoose.startSession();try{await referenceSession.withTransaction(async()=>{if(await AppMigration.findById('reference-packages-20261020').session(referenceSession))return;for(const pkg of referencePackages){const before=await CreditPackage.findOne({key:pkg.key}).session(referenceSession);await CreditPackage.updateOne({key:pkg.key},{$set:{...pkg,currency:'USD',active:true}},{session:referenceSession});await AdminAudit.create([{action:'reference-package-update',target:pkg.key,reason:'Owner approved the exact four-tier package reference',before:before?.toObject(),after:{...pkg,currency:'USD',active:true}}],{session:referenceSession});}await AppMigration.create([{_id:'reference-packages-20261020',appliedAt:new Date()}],{session:referenceSession});});}finally{await referenceSession.endSession();}
   const rules = [
     ["ai_research_chat", "gemini", "gemini-3.8-flash", "request"],
     ["publishing_optimization", "gemini", "gemini-3.8-flash", "request"],

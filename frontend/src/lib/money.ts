@@ -1,1 +1,2 @@
 export function formatPackagePrice(amount:number,currency='USD'){return new Intl.NumberFormat('en-US',{style:'currency',currency,currencyDisplay:'narrowSymbol',minimumFractionDigits:0,maximumFractionDigits:2}).format(Number(amount));}
+export function formatCreditRate(amount:number,credits:number,currency='USD'){return new Intl.NumberFormat('en-US',{style:'currency',currency,currencyDisplay:'narrowSymbol',minimumFractionDigits:3,maximumFractionDigits:3}).format(Number(amount)/Number(credits));}
