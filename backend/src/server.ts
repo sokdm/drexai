@@ -1,3 +1,4 @@
+import {requestProtection} from './middleware/requestProtection.js';
 import {startAgentTaskWorker} from "./services/agentStory.js";
 import { startRenderFallback } from "./services/renderFallback.js";
 import { startScriptWorker } from "./services/scriptProduction.js";
@@ -43,11 +44,12 @@ import { setRealtimeServer } from "./realtime.js";
 
 const app = express();
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
 app.use(helmet({ contentSecurityPolicy: { directives: { "script-src": ["'self'", "https://challenges.cloudflare.com", "https://www.youtube.com", "https://s.ytimg.com"], "frame-src": ["'self'", "https://challenges.cloudflare.com", "https://www.youtube.com", "https://www.youtube-nocookie.com"], "img-src": ["'self'", "data:", "blob:", "https:"], "media-src": ["'self'", "data:", "blob:", "https:"], "connect-src": ["'self'", "https:", "wss:", ...(env.SERVE_FRONTEND ? [] : ["http://localhost:*", "ws://localhost:*"])] } } }));
 app.use(cors({ origin: env.CLIENT_ORIGIN, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
-app.use("/api", platformGate);
+app.use("/api", requestProtection, platformGate);
 app.get("/api/platform-status", async (req, res) => { const c = await PlatformControl.findById("platform"); const admin = await adminIdentity(req); const website = await WebsiteSettings.findById("public").select("siteName description supportEmail -_id").lean(); res.json({ website, maintenance: !!c?.maintenance && !admin, message: c?.message || "We will be back shortly." }); });
 app.use("/api/admin", adminRouter);
 app.use("/api/health", healthRouter);

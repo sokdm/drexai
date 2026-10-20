@@ -1,0 +1,2 @@
+import {Schema,model} from 'mongoose';
+const schema=new Schema({userId:{type:Schema.Types.ObjectId,required:true,index:true},requestId:{type:String,required:true},brief:{type:String,required:true,maxlength:4000},target:{type:String,enum:['general','video','image','script'],required:true},status:{type:String,enum:['processing','completed','failed'],default:'processing'},prompt:String,error:String,model:String},{timestamps:true});schema.index({userId:1,requestId:1},{unique:true});export const PromptDraft=model('PromptDraft',schema);

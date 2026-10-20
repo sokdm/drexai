@@ -1,3 +1,4 @@
+import {promptCreatorRouter} from './promptCreator.js';
 import {chatPrompt} from "../services/chatPrompt.js";
 import {conversationContext} from "../services/conversationMemory.js";
 import {freeChatTerms,admitChatMessage,publicChatError} from "../services/chatAccess.js";
@@ -25,6 +26,7 @@ import { randomToken } from "../utils/crypto.js";
 export const aiRouter = Router();
 const limiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
 aiRouter.use(requireAuth, requireCsrf, limiter);
+aiRouter.use(promptCreatorRouter);
 aiRouter.use(researchAgentRouter);
 aiRouter.use(scriptsRouter);
 

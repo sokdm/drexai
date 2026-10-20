@@ -1,3 +1,4 @@
+import {requestProtection} from '../dist/middleware/requestProtection.js';
 import cookieParser from 'cookie-parser';import {User} from '../dist/models/User.js';import {Session} from '../dist/models/Session.js';import {hashSecret} from '../dist/utils/crypto.js';
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -20,7 +21,7 @@ before(async () => {
   const user=await User.create({email:"checkout-security@example.test",displayName:"Checkout tester",passwordHash:"fixture",status:"active"});owner=user._id;await Session.create({userId:owner,tokenHash:hashSecret("checkout-test"),csrfTokenHash:hashSecret("csrf"),expiresAt:new Date(Date.now()+3600000)});pkg = new mongoose.Types.ObjectId();
   env.FLUTTERWAVE_MODE = "test"; env.FLW_SECRET_KEY = "FLWSECK_TEST-fixture"; env.FLW_PUBLIC_KEY = "FLWPUBK_TEST-fixture"; env.FLW_WEBHOOK_HASH = "test-webhook-secret";
   globalThis.fetch = async (url, options) => { if (String(url).startsWith("https://api.flutterwave.com/")) { providerCalls++; return new Response(JSON.stringify({ status: "success", data: current }), { status: 200 }); } return originalFetch(url, options); };
-  const app = express(); app.use(express.json(),cookieParser()); app.use("/api/wallet", walletRouter); app.use(errorHandler);
+  const app = express(); app.use(express.json(),cookieParser()); app.use(requestProtection); app.use("/api/wallet", walletRouter); app.use(errorHandler);
   server = await new Promise(resolve => { const value = app.listen(0, "127.0.0.1", () => resolve(value)); }); base = `http://127.0.0.1:${server.address().port}`;
 });
 after(async () => { globalThis.fetch = originalFetch; server?.closeAllConnections(); if (server) await new Promise(r => server.close(r)); await mongoose.disconnect(); await db?.stop(); });

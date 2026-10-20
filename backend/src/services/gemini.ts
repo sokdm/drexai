@@ -63,6 +63,7 @@ export async function geminiJson<T>(input: {
   schema: z.ZodSchema<T>;
   model?: string;
   maxOutputTokens?: number;
+  timeoutMs?: number; disableReasoning?: boolean;
   userId?: string; reservationId?: string; requestLimits?: { maxInputTokens: number; maxOutputTokens: number };
 }) {
   assertGeminiReady();

@@ -1,3 +1,4 @@
+import {env} from '../config/env.js';
 import {turnstileConfig,turnstileGuard} from '../services/turnstile.js';
 import { verifyPassword } from "../utils/password.js";
 import { notify } from "../services/notifications.js";
@@ -75,8 +76,8 @@ async function issueSession(user: any, req: any, res: any) {
     ip: req.ip,
     expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14)
   });
-  res.cookie("drex_session", token, { httpOnly: true, sameSite: "lax", secure: false, maxAge: 1000 * 60 * 60 * 24 * 14 });
-  res.cookie("drex_csrf", csrf, { httpOnly: false, sameSite: "lax", secure: false, maxAge: 1000 * 60 * 60 * 24 * 14 });
+  res.cookie("drex_session", token, { httpOnly: true, sameSite: "lax", secure: env.APP_URL.startsWith("https:"), maxAge: 1000 * 60 * 60 * 24 * 14 });
+  res.cookie("drex_csrf", csrf, { httpOnly: false, sameSite: "lax", secure: env.APP_URL.startsWith("https:"), maxAge: 1000 * 60 * 60 * 24 * 14 });
   return csrf;
 }
 

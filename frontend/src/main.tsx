@@ -1,3 +1,4 @@
+import {AIAssistantDashboard} from './pages/dashboard/AIAssistantDashboard';
 import {CharacterAnimatorPage} from './pages/dashboard/CharacterAnimatorPage';
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { AdminPage } from "./pages/AdminPage";
@@ -21,7 +22,6 @@ import { SettingsPage } from "./pages/dashboard/SettingsPage";
 import { WalletPage } from "./pages/dashboard/WalletPage";
 import { YouTubeResearchPage } from "./pages/dashboard/YouTubeWorkspace";
 import { MyYouTubeChannelPage } from "./pages/dashboard/MyYouTubeChannelPage";
-import { AIAssistantPage } from "./pages/dashboard/AIAssistantPage";
 import { NichesPage } from "./pages/dashboard/NichesPage";
 import { ScriptBuilderPage } from "./pages/dashboard/ScriptBuilderPage";
 import { ProjectsPage } from "./pages/dashboard/ProjectsPage";
@@ -62,7 +62,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="youtube-research/*" element={<YouTubeResearchPage />} />
             <Route path="youtube-channel" element={<MyYouTubeChannelPage />} />
             <Route path="publishing" element={<PublishingPage />} />
-            <Route path="ai-assistant" element={<AIAssistantPage />} />
+            <Route path="ai-assistant" element={<AIAssistantDashboard />} />
             <Route path="my-niches" element={<NichesPage />} />
             <Route path="script-builder" element={<ScriptBuilderPage />} />
             <Route path="projects" element={<ProjectsPage />} />
