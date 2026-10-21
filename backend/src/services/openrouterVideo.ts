@@ -1,8 +1,18 @@
+import sharp from "sharp";
 import { env } from "../config/env.js";
 import { routerResponse, verifiedRouterModel, routerId, recordRouterUsage } from "./openrouter.js";
 import { buildVeoPrompt } from "./sceneAudio.js";
 import { inspectNativeVideo } from "./nativeAudio.js";
 
+export async function boundedVideoReference(base64:string) {
+  const input=Buffer.from(base64,'base64');
+  if(!input.length||input.length>40*1024*1024)throw new Error('The reference image is too large. Choose an image under 40 MB.');
+  for(const size of [1536,1024,768]){
+    const image=await sharp(input,{limitInputPixels:40000000}).rotate().resize({width:size,height:size,fit:'inside',withoutEnlargement:true}).flatten({background:'#ffffff'}).jpeg({quality:82}).toBuffer();
+    if(image.length<=600*1024)return 'data:image/jpeg;base64,'+image.toString('base64');
+  }
+  throw new Error('The reference image could not fit the video request limit. Choose a smaller image.');
+}
 async function routerVideoRequest(settings: any) {
   const record = await verifiedRouterModel(settings.model, "video");
   for (const [key, value] of [["supported_durations", settings.durationSeconds], ["supported_resolutions", String(settings.quality).toLowerCase()], ["supported_aspect_ratios", settings.aspectRatio]] as const) {
@@ -12,7 +22,8 @@ async function routerVideoRequest(settings: any) {
   if (!["bytedance/seedance-1-5-pro", "google/veo-3.1", "alibaba/wan-3.0", "kwaivgi/kling-v3.0-std"].includes(routerId(settings.model))) throw new Error("A native-audio-capable video adapter is required");
   if (["bytedance/seedance-1-5-pro","alibaba/wan-3.0","kwaivgi/kling-v3.0-std"].includes(routerId(settings.model)) && (record.generate_audio !== true || !record.supported_frame_images?.includes("first_frame"))) throw new Error("Native audio and first-frame input are not verified for this model");
   const body: any = { model: routerId(settings.model), prompt: buildVeoPrompt(settings), duration: settings.durationSeconds, resolution: String(settings.quality).toLowerCase(), aspect_ratio: settings.aspectRatio, generate_audio: settings.nativeAudio !== false };
-  if (settings.sourceImageBytes) body.frame_images = [{ type: "image_url", frame_type: "first_frame", image_url: { url: `data:${settings.sourceImageMimeType || "image/png"};base64,${settings.sourceImageBytes}` } }];
+  if (settings.sourceImageBytes) body.frame_images = [{ type: "image_url", frame_type: "first_frame", image_url: { url: await boundedVideoReference(settings.sourceImageBytes) } }];
+  if(Buffer.byteLength(JSON.stringify(body),"utf8")>1024*1024)throw new Error("The video request is too large. Shorten the scene instructions or use a smaller reference image.");
   return body;
 }
 export async function createRouterVideo(settings: any) {
