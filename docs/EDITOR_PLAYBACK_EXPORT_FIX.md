@@ -1,0 +1,9 @@
+# Editor playback and mixed-resolution exports
+
+The export failure is caused by explicit scale > 1.01 rejections in both timeline metadata validation and the worker's actual-media probe. Even a small mismatch between a provider's frame size and the selected canvas could reject an otherwise readable source at 1%. FFmpeg already scales sources to the canvas; those duplicate upscaling prohibitions are removed. The UI discloses that larger output sizes can look softer and do not use AI upscaling. Source ownership, media readability, trim bounds, supported export dimensions, audio validation, reservations and verified storage checks remain enforced. Worker duration validation now accounts for playback speed.
+
+The preview had no bounded recovery from waiting events and gated playback restarts while buffering. It now retries playback of the same media element when paused, clears buffering on loaded data/playing and on source URL changes, and stops with a Refresh media links action message after 15 seconds of continuous buffering. It never regenerates paid media. No live production media/network trace was available; the cause of the user's specific remote stalled download is not established by the screenshot alone.
+
+MP4 downloads now use an authenticated fetch, verify HTTP success and video content type, then save the blob using the attachment filename. An HTML response cannot masquerade as a completed MP4 download.
+
+Verified without paid requests: backend/frontend builds, frontend typecheck, 13 local MongoDB/real FFmpeg tests (including a 320x180 source exported successfully to 854x480, audio placement, worker verification and download), and five browser checks covering phone/desktop edits, actual MP4 playback, overlays, download and stalled-stream recovery. No user assets, live jobs or wallet records were modified. Failed historical exports remain failed; retry export after deploying the fix.

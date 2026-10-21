@@ -39,10 +39,8 @@ export async function processVideoExport(id?: string, storage: Storage = { read:
       if (asset.type === "audio" && !info.audio) throw new Error("Unreadable audio source");
       if (asset.type !== "audio" && !info.video) throw new Error("Unreadable visual source");
       for (const clip of timeline.clips.filter(c => c.assetId === String(asset._id))) {
-        if (clip.kind === "video" && clip.sourceIn + clip.duration > info.duration + 0.05) throw new Error(`Clip exceeds actual source duration: ${clip.label}`);
-        const [w, h] = outputDimensions(timeline.aspectRatio, settings.resolution);
-        const scale = clip.fit === "cover" ? Math.max(w / info.width, h / info.height) : Math.min(w / info.width, h / info.height);
-        if (scale > 1.01) throw new Error(`Source cannot support selected resolution: ${clip.label}`);
+        if (clip.kind === "video" && clip.sourceIn + clip.duration * (clip.speed ?? 1) > info.duration + 0.05) throw new Error(`Clip exceeds actual source duration: ${clip.label}`);
+        // Standard FFmpeg scaling supports mixed-resolution sources; no AI upscaling.
       }
       for (const overlay of (timeline.overlays || []).filter(o => o.assetId === String(asset._id))) if (overlay.kind === "video" && overlay.sourceIn + overlay.duration > info.duration + .05) throw new Error("Overlay exceeds actual source duration");
       for (const audio of timeline.audio.filter(a => a.assetId === String(asset._id))) if (audio.sourceIn + audio.duration > info.duration + 0.05) throw new Error(`Audio exceeds actual source duration: ${audio.label}`);

@@ -77,7 +77,7 @@ for (const width of [390, 1440]) test(`Phase 10 timeline edits, save/resume, cap
   await expect(page.getByText("Your finished video is ready", { exact: false })).toBeVisible();
   expect(state.edit.timeline.captions[0].text).toBe("Edited caption");
   await page.getByRole("button", { name: "Save to project", exact: true }).click(); await expect.poll(() => state.savedProject).toBe(true);
-  const downloadPromise = page.waitForEvent("download"); await page.getByRole("link", { name: "Download MP4", exact: true }).click(); const download = await downloadPromise; expect(download.suggestedFilename()).toBe("editor-export.mp4");
+  const downloadPromise = page.waitForEvent("download"); await page.getByRole("button", { name: "Download MP4", exact: true }).click(); const download = await downloadPromise; expect(download.suggestedFilename()).toBe("editor-export.mp4");
   await expect(page.getByRole("link", { name: "Continue to Publishing Tools" })).toHaveAttribute("href", /exportId=/);
   expect(errors).toEqual([]);
 });
@@ -102,4 +102,15 @@ test("image and video overlays share preview, timeline and saved edit",async({pa
  await page.reload();await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toBeAttached();
  await page.getByRole("button",{name:"overlays",exact:true}).click();await page.getByRole("button",{name:"Remove overlay",exact:true}).click();
  await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toHaveCount(0);
+});
+
+test('stalled preview stops with a recovery message instead of buffering forever',async({page})=>{
+ await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);
+ await page.getByRole('button',{name:'Continue without music',exact:true}).click();
+ await expect.poll(()=>page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(3);
+ await page.getByRole('button',{name:'Play rough cut',exact:true}).click();
+ await page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>{v.play=()=>new Promise<void>(()=>{});v.pause();v.dispatchEvent(new Event('waiting'));});
+ await expect(page.getByText(/Buffering/)).toBeVisible();
+ await expect(page.getByText(/Video loading stalled/)).toBeVisible({timeout:22000});
+ await expect(page.getByRole('button',{name:'Play rough cut',exact:true})).toBeVisible();
 });

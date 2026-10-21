@@ -38,11 +38,7 @@ export async function validateTimelineAssets(timeline: EditorTimeline, userId: s
     const asset = map.get(c.assetId!)!;
     if (asset.type !== c.kind) editorFail("Clip type does not match its source");
     if (c.kind === "video" && asset.durationSeconds && c.sourceIn + c.duration * (c.speed ?? 1) > asset.durationSeconds + 0.05) editorFail(`Trim exceeds source duration: ${c.label}`);
-    if (settings && asset.width && asset.height) {
-      const [w, h] = outputDimensions(timeline.aspectRatio, settings.resolution);
-      const scale = c.fit === "cover" ? Math.max(w / asset.width, h / asset.height) : Math.min(w / asset.width, h / asset.height);
-      if (scale > 1.01) editorFail(`Choose a lower resolution for ${c.label}; source upscaling is disabled`);
-    }
+    // FFmpeg scales mixed source dimensions to the selected export canvas.
   }
   for (const o of timeline.overlays || []) {
     const asset = map.get(o.assetId)!;

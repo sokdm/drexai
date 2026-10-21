@@ -130,7 +130,7 @@ test("exports reject unavailable infrastructure, unsupported resolution and unsa
   const settings = { format: "mp4", resolution: "480p", quality: "standard", filename: "phase10-final" };
   assert.equal((await request(`/edits/${edit._id}/exports`, json({ revision: 1, settings }))).response.status, 503);
   await RenderWorker.create({ _id: "ffmpeg", expiresAt: new Date(Date.now() + 60000), capabilities: await renderCapabilities() });
-  assert.equal((await request(`/edits/${edit._id}/exports`, json({ revision: 1, settings: { ...settings, resolution: "1080p" } }))).response.status, 400);
+  assert.equal((await request(`/edits/${edit._id}/exports`, json({ revision: 1, settings: { ...settings, resolution: "2160p" } }))).response.status, 400);
   assert.equal((await request(`/edits/${edit._id}/exports`, json({ revision: 1, settings: { ...settings, filename: "../../bad;command" } }))).response.status, 400);
   assert.equal((await request(`/edits/${edit._id}/exports`, json({ revision: 0, settings }))).response.status, 409);
 });
@@ -202,4 +202,13 @@ test("blank editor opens without a Studio production and retries preserve one sa
  const first=await request("/blank",json({requestId}));assert.equal(first.response.status,201);assert.equal(first.data.edit.timeline.clips.length,0);
  const again=await request("/blank",json({requestId}));assert.equal(again.data.edit._id,first.data.edit._id);assert.equal(await VideoEdit.countDocuments({userId:user._id}),count+1);
  const loaded=await request("/edits/"+first.data.edit._id);assert.equal(loaded.response.status,200);assert.equal(loaded.data.edit.title,"Untitled video");
+});
+
+test('mixed-resolution source renders to the requested canvas instead of failing at one percent',async()=>{
+ const bytes=await sharp({create:{width:320,height:180,channels:3,background:'#45aabb'}}).png().toBuffer();
+ const asset=await MediaAsset.create({userId:user._id,projectId:project._id,type:'image',provider:'upload',key:'small-source',width:320,height:180});
+ const timeline=timelineSchema.parse({clips:[{id:'small',kind:'image',assetId:String(asset._id),label:'THE HOOK',duration:.5,sourceIn:0,fit:'cover'}],audio:[],captions:[],aspectRatio:'16:9',musicDecision:'none'});
+ const job=await VideoExport.create({userId:user._id,editId:edit._id,projectId:project._id,revision:0,timeline,settings:{format:'mp4',resolution:'480p',quality:'draft',filename:'scaled-source'}});
+ let rendered;await processVideoExport(String(job._id),{read:async()=>bytes,upload:async(file,key)=>{rendered=await probeMedia(file);return{key,bucket:'fixture'};}});
+ const saved=await VideoExport.findById(job._id);assert.equal(saved.status,'completed',saved.error);assert.equal(rendered.width,854);assert.equal(rendered.height,480);
 });
