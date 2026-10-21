@@ -11,24 +11,25 @@ const directVideoModels = [
   { id: "veo-3.1-generate-preview", label: "Veo 3.1", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4], qualities: ["720p", "1080p", "4K"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }
 ];
 
-const alternativeVideoModels = [{ id: "openrouter/alibaba/wan-3.0", label: "Wan 3.0 with audio", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4, 2, 3, 5, 7, ...Array.from({length:22},(_,i)=>i+9)], qualities: ["480p", "720p", "1080p"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }, {id:"openrouter/kwaivgi/kling-v3.0-std",label:"Kling 3.0 Standard with audio",aspectRatios:["16:9","9:16","1:1"],durations:[8,6,4,3,5,7,9,10,11,12,13,14,15],qualities:["720p"],maxQuantity:1,imageToVideo:true,nativeAudio:true}];
+const alternativeVideoModels = [{id:"openrouter/bytedance/seedance-1-5-pro",label:"Seedance 1.5 Pro",aspectRatios:["16:9","9:16","1:1"],durations:[8,4,5,6,7,9,10,11,12],qualities:["480p","720p","1080p"],maxQuantity:1,imageToVideo:true,nativeAudio:true},{ id: "openrouter/alibaba/wan-3.0", label: "Wan 3.0 with audio", aspectRatios: ["16:9", "9:16"], durations: [8, 6, 4, 2, 3, 5, 7, ...Array.from({length:22},(_,i)=>i+9)], qualities: ["480p", "720p", "1080p"], maxQuantity: 1, imageToVideo: true, nativeAudio: true }, {id:"openrouter/kwaivgi/kling-v3.0-std",label:"Kling 3.0 Standard with audio",aspectRatios:["16:9","9:16","1:1"],durations:[8,6,4,3,5,7,9,10,11,12,13,14,15],qualities:["720p"],maxQuantity:1,imageToVideo:true,nativeAudio:true}];
 const routerVideoModels = directVideoModels.map(m => ({ ...m, id: "openrouter/google/veo-3.1", label: "Veo 3.1 via OpenRouter", qualities: ["720p", "1080p"] }));
 export const videoModels = env.OPENROUTER_API_KEY ? [...alternativeVideoModels, ...routerVideoModels, ...directVideoModels] : [...directVideoModels, ...alternativeVideoModels, ...routerVideoModels];
 
 export function validateVideoSettings(input: any) {
   const model = videoModels.find((item) => item.id === input.model);
-  if (!model) throw new Error("Unsupported Veo model");
-  if (!model.aspectRatios.includes(input.aspectRatio)) throw new Error("Unsupported aspect ratio for selected Veo model");
+  if (!model) throw new Error("Unsupported video model");
+  if (!model.aspectRatios.includes(input.aspectRatio)) throw new Error("Unsupported aspect ratio for selected video model");
   if (!model.durations.includes(Number(input.durationSeconds))) throw new Error("Unsupported duration for selected Veo model");
   if (!model.qualities.includes(input.quality)) throw new Error("Unsupported output quality for selected Veo model");
-  if (!model.id.includes("alibaba/wan-") && !model.id.includes("kwaivgi/kling-") && input.quality !== "720p" && Number(input.durationSeconds) !== 8) throw new Error("1080p and 4K Veo output require an eight-second clip");
+  if (!model.id.includes("seedance-") && !model.id.includes("alibaba/wan-") && !model.id.includes("kwaivgi/kling-") && input.quality !== "720p" && Number(input.durationSeconds) !== 8) throw new Error("1080p and 4K Veo output require an eight-second clip");
   const quantity = Number(input.quantity ?? 1);
   if (quantity < 1 || quantity > model.maxQuantity) throw new Error(`Selected model supports 1-${model.maxQuantity} outputs`);
   if (!String(input.motionPrompt ?? "").trim()) throw new Error("Motion prompt is required");
   if (!input.sourceImageAssetId && !input.sourceImageUrl) throw new Error("Select or upload a source image first");
   const audio = z.object(sceneAudioFields).parse(input);
+  if(input.nativeAudio===false&&audio.dialogueLines?.length)throw new Error("Dialogue requires native audio. Enable audio or remove the spoken lines before quoting.");
   if (segmentDialogue(audio.dialogueLines ?? [], Number(input.durationSeconds)).length > 1) throw new Error("Dialogue is too long for this clip. Use at most 14 words per 8 seconds, or divide it into Studio scenes.");
-  return { ...input, ...audio, model: model.id, quantity, durationSeconds: Number(input.durationSeconds), nativeAudio: true };
+  return { ...input, ...audio, model: model.id, quantity, durationSeconds: Number(input.durationSeconds), nativeAudio: input.nativeAudio !== false };
 }
 
 export function planClipDurations(targetSeconds: number, modelId = env.VEO_MODEL) {
@@ -79,8 +80,8 @@ export async function pollVeoOperation(operationName: string, timeoutMs = 12 * 6
   throw new Error("Veo generation timed out; existing operation can be resumed without submitting another generation");
 }
 
-export async function downloadVeoVideos(operation: any, context?: { userId?: string; model?: string; reservationId?:string }) {
-  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId, context?.model, context?.reservationId);
+export async function downloadVeoVideos(operation: any, context?: { userId?: string; model?: string; reservationId?:string; nativeAudio?:boolean }) {
+  if (operation.name?.startsWith("openrouter:")) return downloadRouterVideo(operation, context?.userId, context?.model, context?.reservationId,context?.nativeAudio!==false);
   const samples = operation.response?.generateVideoResponse?.generatedSamples ?? operation.response?.generatedVideos ?? [];
   const outputs: { buffer: Buffer; contentType: string; metadata: any }[] = [];
   for (const sample of samples) {
@@ -94,7 +95,7 @@ export async function downloadVeoVideos(operation: any, context?: { userId?: str
     }
   }
   if (outputs.length === 0) throw new Error("Veo returned no downloadable videos");
-  for (const output of outputs) output.metadata = { ...output.metadata, ...await inspectNativeVideo(output.buffer) };
+  for (const output of outputs) output.metadata = { ...output.metadata, ...await inspectNativeVideo(output.buffer,context?.nativeAudio!==false) };
   return outputs;
 }
 

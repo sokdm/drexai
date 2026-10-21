@@ -1,3 +1,4 @@
+import {sceneDialogue} from './sceneAudio.js';
 import {StudioVideoReceipt} from '../models/StudioVideoReceipt.js';
 import {CreditApproval} from "../models/CreditApproval.js";
 import {CreditReservation} from "../models/CreditReservation.js";
@@ -97,14 +98,14 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         step.status = "skipped"; await checkpoint();
         await studioLog(production, "waiting", step.label + ": legacy separate dialogue skipped; prepare a new native-audio plan.", step.key); continue;
       }
-      if (step.kind === "video" && !step.input.nativeAudio && production.snapshot.scenes.some((scene: any) => String(scene._id) === step.sceneId && (scene.dialogue?.trim() || scene.dialogueLines?.length))) {
+      if (step.kind === "video" && !step.input.nativeAudio && production.snapshot.scenes.some((scene: any) => String(scene._id) === step.sceneId && sceneDialogue(scene).length)) {
         step.status = "needs_review"; throw new Error("This legacy dialogue plan requires a new native audiovisual quote. Completed assets are preserved; regenerate the scene with a new plan.");
       }
       if (await finishControl()) return;
       await checkGenerationUser(String(production.userId));
       const reserve=await CreditReservation.findOne({_id:production.reservationId,userId:production.userId,status:"reserved"});
       if(!reserve || (reserve.remainingCredits??reserve.credits)<step.credits)throw new Error("Approved production budget is closed or exhausted. No provider request was submitted.");
-      if (!step.reused) await assertProviderBudget(step.input.model, step.pricing?.providerCostUsd);
+      if (!step.reused && !step.providerJobId) await assertProviderBudget(step.input.model, step.pricing?.providerCostUsd);
       if (step.input.model.startsWith("openrouter/") && !step.providerJobId) await (await import("./openrouterManagement.js")).checkProviderAffordability(Number(step.pricing?.providerCostUsd));
       const assets = await MediaAsset.find({ _id: { $in: steps.map(s => s.assetId).filter(Boolean) }, userId: production.userId, deletedAt: null }).lean();
       if (step.kind === "video") {
@@ -123,7 +124,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         const recovering = step.status === "requesting" || Boolean(step.stored);
         if (recovering) {
           const object = await providers.read(key);
-          if (object) output = { ...object, durationSeconds: step.kind === "audio" ? wavDuration(object.buffer) : step.kind === "video" ? step.input.durationSeconds : undefined, providerUsage: step.kind === "video" ? await inspectNativeVideo(object.buffer) : undefined };
+          if (object) output = { ...object, durationSeconds: step.kind === "audio" ? wavDuration(object.buffer) : step.kind === "video" ? step.input.durationSeconds : undefined, providerUsage: step.kind === "video" ? await inspectNativeVideo(object.buffer,step.input.nativeAudio!==false) : undefined };
           else if (!step.providerJobId) {
             step.status = "needs_review";
             throw new Error("A provider request was interrupted before its result was saved. It will not be submitted again automatically. Review or regenerate this output with a new quote.");
@@ -143,7 +144,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           if(step.kind==='video')input.onVideoSubmitted=async(operationName:string)=>{
             if(typeof operationName!=="string"||!operationName.trim())throw new Error("Provider did not return a video operation ID; review before retrying.");
             // Record acceptance independently before later worker checkpoints.
-            step.providerJobId=operationName;
+            step.providerJobId=operationName;step.providerPhase="accepted";
             await StudioVideoReceipt.updateOne({productionId:production._id,stepKey:step.key},{$setOnInsert:{userId:production.userId,operationName,model:input.model}},{upsert:true});
           };
           if (step.kind === "video" && !step.providerJobId) {
@@ -153,6 +154,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
             input.sourceImageBytes = bytes.buffer.toString("base64"); input.sourceImageMimeType = bytes.contentType;
           }
           step.status = "requesting"; step.error = undefined;
+          if(step.kind==="video"){step.providerPhase=step.providerJobId?"resuming":"submitting";step.submissionStartedAt=step.submissionStartedAt||new Date().toISOString();}
           await checkpoint();
           await studioLog(production, "processing", `${step.label}: ${step.providerJobId ? "resuming provider operation" : step.kind === "video" ? "submitting video request" : "generation submitted"} / billable, approved ceiling ${step.credits} credits`, step.key);
           if (step.kind === "image") {
@@ -162,10 +164,12 @@ export async function runStudioProduction(id: string, providers: StudioProviders
           } else {
             if (!step.providerJobId) { const operationName=await providers.createVideo(input);await input.onVideoSubmitted(operationName);await checkpoint(); }
             if(!step.providerJobId)throw new Error("Provider did not return a video operation ID; review before retrying.");
+            step.providerPhase="polling";await checkpoint();
             const operation = await providers.pollVideo(step.providerJobId);
-            const videos = await providers.downloadVideo(operation, { userId: String(production.userId), model: step.input.model,reservationId:String(production.reservationId) });
+            step.providerPhase="downloading";await checkpoint();
+            const videos = await providers.downloadVideo(operation, { userId: String(production.userId), model: step.input.model,reservationId:String(production.reservationId),nativeAudio:step.input.nativeAudio!==false });
             const native = videos[0].metadata;
-            if (step.input.nativeAudio && (!native?.nativeAudio || Math.abs(Number(native.durationSeconds) - step.input.durationSeconds) > 0.5)) throw Object.assign(new Error("Generated native audiovisual clip is incomplete or has an unexpected duration. Review and regenerate with a new quote."), { mediaRejected: true });
+            if ((step.input.nativeAudio && !native?.nativeAudio) || Math.abs(Number(native?.durationSeconds) - step.input.durationSeconds) > 0.5) throw Object.assign(new Error("Generated native audiovisual clip is incomplete or has an unexpected duration. Review and regenerate with a new quote."), { mediaRejected: true });
             output = { ...videos[0], durationSeconds: native?.durationSeconds ?? step.input.durationSeconds, providerUsage: { ...((operation.response as any)?.usageMetadata ?? {}), ...native } };
           }
           if (!output?.buffer?.length) throw new Error("Provider returned an empty output");
@@ -179,6 +183,7 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         if (lostLease) throw new Error("Worker lease lost before storage");
         const upload = step.kind === "image" ? providers.uploadImage : step.kind === "audio" ? providers.uploadAudio : providers.uploadVideo;
         const stored = await upload(output.buffer, key, output.contentType);
+        if(step.kind==="video")step.providerPhase="stored";
         step.stored = { key, bucket: stored.bucket, sizeBytes: output.buffer.length, contentType: output.contentType, durationSeconds: output.durationSeconds, providerUsage: output.providerUsage };
         await checkpoint();
         asset = await MediaAsset.findOneAndUpdate({ productionId: production._id, productionStepKey: step.key, userId: production.userId }, { $setOnInsert: {
@@ -228,11 +233,15 @@ export async function runStudioProduction(id: string, providers: StudioProviders
       current.providerJobId = undefined;
     }
     if (error.mediaRejected && current) { current.status = "needs_review"; }
+    console.warn(JSON.stringify({event:"studio_operation_failed",productionId:id,stepKey:current?.key,phase:current?.providerPhase,hasProviderJob:Boolean(current?.providerJobId),name:error.name,status:error.status||error.statusCode,code:error.code,providerRejected:Boolean(error.providerRejected)}));
     const uncertain = current?.status === "needs_review" || (current?.status === "requesting" && !current.providerJobId && !current.stored && !error.providerRejected);
+    if(uncertain&&current?.kind==='video')error.message='The video request could not be confirmed. Completed assets are saved. Ask the agent to review or retry this output; replacement generation requires fresh approval.';
+    else if(current?.providerJobId&&/timeout|timed out|abort|fetch|connection|network/i.test(error.message))error.message='The provider job is saved, but its result could not be retrieved yet. Ask the agent to retry; the existing job can be resumed without submitting it again.';
     if (current && current.status !== "completed") { current.status = uncertain ? "needs_review" : "failed"; current.error = error.message; }
     await checkpoint({ status: uncertain ? "needs_review" : "failed", error: error.message });
     if(production.approvalMode==="cards")await (await import("./agentApprovals.js")).finishCreditCard(production,"failed");
-    // Legacy production budgets remain reserved for recovery; scoped cards release unused funds.
+    if(production.approvalMode!=="cards"&&production.reservationId)await closeStudioReserve(String(production.reservationId),"production_failed_unused_released");
+    // A retry must obtain a fresh approval after unused credits are released.
     await studioLog(production, "failure", error.message, current?.key);
   } finally {
     clearInterval(heartbeat);

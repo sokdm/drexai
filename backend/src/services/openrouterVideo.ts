@@ -9,9 +9,9 @@ async function routerVideoRequest(settings: any) {
     if (!record[key]?.includes(value)) throw new Error(`OpenRouter video capability not verified: ${key}=${value}`);
   }
   // Only the documented native-audio Veo adapter is exposed; generic video is not a talking-avatar API.
-  if (!["google/veo-3.1", "alibaba/wan-3.0", "kwaivgi/kling-v3.0-std"].includes(routerId(settings.model))) throw new Error("A native-audio-capable video adapter is required");
-  if (["alibaba/wan-3.0","kwaivgi/kling-v3.0-std"].includes(routerId(settings.model)) && (record.generate_audio !== true || !record.supported_frame_images?.includes("first_frame"))) throw new Error("Native audio and first-frame input are not verified for this model");
-  const body: any = { model: routerId(settings.model), prompt: buildVeoPrompt(settings), duration: settings.durationSeconds, resolution: String(settings.quality).toLowerCase(), aspect_ratio: settings.aspectRatio, generate_audio: true };
+  if (!["bytedance/seedance-1-5-pro", "google/veo-3.1", "alibaba/wan-3.0", "kwaivgi/kling-v3.0-std"].includes(routerId(settings.model))) throw new Error("A native-audio-capable video adapter is required");
+  if (["bytedance/seedance-1-5-pro","alibaba/wan-3.0","kwaivgi/kling-v3.0-std"].includes(routerId(settings.model)) && (record.generate_audio !== true || !record.supported_frame_images?.includes("first_frame"))) throw new Error("Native audio and first-frame input are not verified for this model");
+  const body: any = { model: routerId(settings.model), prompt: buildVeoPrompt(settings), duration: settings.durationSeconds, resolution: String(settings.quality).toLowerCase(), aspect_ratio: settings.aspectRatio, generate_audio: settings.nativeAudio !== false };
   if (settings.sourceImageBytes) body.frame_images = [{ type: "image_url", frame_type: "first_frame", image_url: { url: `data:${settings.sourceImageMimeType || "image/png"};base64,${settings.sourceImageBytes}` } }];
   return body;
 }
@@ -35,11 +35,11 @@ export async function pollRouterVideo(operationName: string, timeout = 12 * 6000
   }
   throw new Error("OpenRouter video polling timed out. Resume the saved operation; do not submit a duplicate generation.");
 }
-export async function downloadRouterVideo(operation: any, userId?: string, model?: string, reservationId?:string) {
+export async function downloadRouterVideo(operation: any, userId?: string, model?: string, reservationId?:string,nativeAudio=true) {
   const id = String(operation.name).slice("openrouter:".length);
   const response = await downloadRouterContent(id);
   const buffer = Buffer.from(await response.arrayBuffer());
-  const metadata = await inspectNativeVideo(buffer);
+  const metadata = await inspectNativeVideo(buffer,nativeAudio);
   await recordRouterUsage(model || (operation.response.openrouter.model ? "openrouter/" + operation.response.openrouter.model : "openrouter/google/veo-3.1"), "video", operation.response.openrouter, userId, reservationId);
   return [{ buffer, contentType: "video/mp4", metadata: { ...metadata, gateway: "openrouter", usage: operation.response.openrouter.usage } }];
 }

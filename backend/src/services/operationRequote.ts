@@ -14,7 +14,7 @@ async function own(userId:string,id:string){const p=await StudioProduction.findO
 function idle(p:any){if(!['draft','paused','failed'].includes(p.status)||p.control==='cancel'||p.leaseUntil>new Date())fail('Pause the production and wait for the current operation before changing models.');if(p.steps.some((s:any)=>s.status!=='completed'&&s.status!=='skipped'&&(s.providerJobId||s.status==='running'||s.status==='processing')))fail('A provider request is already submitted. Resume its saved job before changing models.');}
 async function build(p:any,kind:string,model:string,quality?:string){
  const key=kind==='image'?'imageModel':kind==='audio'?'voiceModel':'videoModel';
- const settings=studioSettingsSchema.parse({...p.settings,[key]:model,agentSelectModels:false,...(kind==='video'&&quality?{quality}:{}),...(kind==='image'&&quality?{resolution:quality}:{})});
+ const settings=studioSettingsSchema.parse({...p.settings,[key]:model,agentSelectModels:false,...(kind==='video'?{videoModelManual:true,sceneVideoModels:{}}:{}),...(kind==='video'&&quality?{quality}:{}),...(kind==='image'&&quality?{resolution:quality}:{})});
  if(kind==='audio'){const m=ttsModels.find(m=>m.id===model);if(!m)throw new Error('Unsupported speech model');if(!m.voices.includes(settings.voiceId))settings.voiceId=m.voices[0];settings.characterVoices={};}
  const snapshot=JSON.parse(JSON.stringify(p.snapshot));
  // Real measured narration takes priority when rebuilding only unsubmitted video clips.

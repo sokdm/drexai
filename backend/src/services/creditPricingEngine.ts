@@ -81,6 +81,13 @@ export async function estimateRouterCost(input: any, policy: any) {
   // Video SKUs vary by provider. Never use the zero token prices from the general models endpoint.
   if (kind === "video") {
     const quality = String(settings.quality || String(input.unit).split(":")[1] || "720p").toLowerCase(), rates = published.pricing;
+    if(input.model==='openrouter/bytedance/seedance-1-5-pro'){
+      const size:Record<string,number[]>={'480p':[854,480],'720p':[1280,720],'1080p':[1920,1080]};let dimensions=size[quality];if(!dimensions)throw new Error('Unsupported Seedance resolution');
+      if(settings.aspectRatio==='9:16')dimensions=[dimensions[1],dimensions[0]];else if(settings.aspectRatio==='1:1')dimensions=[dimensions[1],dimensions[1]];
+      const record=await verifiedRouterModel(input.model,'video');if(!record.supported_sizes?.includes(dimensions.join('x')))throw new Error('Seedance output dimensions are not verified');
+      const rate=rates[settings.nativeAudio===false?'video_tokens_without_audio':'video_tokens'];if(rate===undefined)throw new Error('Seedance audio pricing is unavailable');
+      return {cost:new Decimal(rate).mul(dimensions[0]).mul(dimensions[1]).mul(24).div(1024).mul(quantity),source:published.source,verifiedAt:published.verifiedAt,limits};
+    }
     const key = input.model === "openrouter/alibaba/wan-3.0" ? `duration_seconds_${quality}` : quality === "4k" ? "duration_seconds_with_audio_4k" : "duration_seconds_with_audio";
     if (rates[key] === undefined) throw new Error("Verify the selected resolution and native-audio video pricing before use");
     return { cost: new Decimal(rates[key]).mul(quantity), source: published.source, verifiedAt: published.verifiedAt, limits };
@@ -125,6 +132,10 @@ export async function quoteAutomaticCredits(input: any) {
   requestLimits.approvedCostUsd = estimate.cost.toNumber();
   if (estimate.cost.gt(values.maxJobUsd)) throw new Error("Estimated provider cost exceeds the maximum per-job spending limit");
   const packages = await CreditPackage.find({ active: true, currency: "USD" }).lean();
-  const calculation = calculateCreditPrice(estimate.cost.toString(), packages, values, Number(input.quantity || 1), input.feature === "text_to_image");
+  let billingCost=estimate.cost;
+  if(input.feature==='image_to_video'&&input.model==='openrouter/bytedance/seedance-1-5-pro'){
+    const baseline=await estimateRouterCost({...input,model:'openrouter/alibaba/wan-3.0'},values);billingCost=Decimal.max(billingCost,baseline.cost);
+  }
+  const calculation = calculateCreditPrice(billingCost.toString(), packages, values, Number(input.quantity || 1), input.feature === "text_to_image");
   return { allowed: true, ...calculation, serviceMinimumCredits: 0, feature: input.feature, provider: "openrouter", model: input.model, requestedModel: input.requestedModel, quantity: input.quantity || 1, unit: input.unit || "request", estimatedCostUsd: estimate.cost.toNumber(), pricingVersion: policy.revision, pricingSource: estimate.source, pricingVerifiedAt: estimate.verifiedAt, requestLimits, assumptions: values, expiresAt: new Date(Date.now() + 600000) };
 }

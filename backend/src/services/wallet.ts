@@ -84,7 +84,7 @@ export async function reserveCredits(userId: string, quote: any, idempotencyKey:
   const prior = await CreditReservation.findOne({ idempotencyKey }).session(outerSession ?? null);
   if (prior) { if (String(prior.userId) !== userId) throw new Error("Reservation ownership mismatch"); return prior; }
   await checkGenerationUser(userId);
-  if (quote.provider === "openrouter" && quote.estimatedCostUsd !== undefined) await (await import("./openrouterManagement.js")).checkProviderAffordability(quote.estimatedCostUsd);
+  if (quote.provider === "openrouter" && quote.estimatedCostUsd !== undefined && Number(quote.estimatedCostUsd)>0) await (await import("./openrouterManagement.js")).checkProviderAffordability(quote.estimatedCostUsd);
   if (quote.model) await assertProviderBudget(quote.model, quote.estimatedCostUsd);
   const control = quote.model ? await ProviderControl.findOne({ model: quote.model }) : null;
   if (control && (!control.enabled || typeof quote.estimatedCostUsd !== "number" || quote.estimatedCostUsd > control.maxJobCostUsd)) throw new Error("Provider is disabled or the job spending cap cannot be satisfied.");

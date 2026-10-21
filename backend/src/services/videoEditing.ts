@@ -17,7 +17,7 @@ export function roughCut(production: any): EditorTimeline {
     for (const clip of scene.clips ?? []) {
       const duration = Math.min(clip.durationSeconds, scene.durationSeconds - coverage);
       if (duration < 0.1) continue;
-      clips.push({ id: randomUUID(), sceneId: scene.sceneId, label: scene.title || "Scene", kind: "video", assetId: clip.assetId, sourceAudio: clip.nativeAudio === true || !(scene.audio ?? []).some((a: any) => a.track === "dialogue"), sourceVolume: 1, sourceMuted: false, nativeDialogue: clip.nativeDialogue === true, sourceIn: 0, duration, transition: "cut", text: "" }); coverage += duration;
+      clips.push({ id: randomUUID(), sceneId: scene.sceneId, label: scene.title || "Scene", kind: "video", assetId: clip.assetId, sourceAudio: clip.nativeAudio !== false && (clip.nativeAudio === true || !(scene.audio ?? []).some((a: any) => a.track === "dialogue")), sourceVolume: 1, sourceMuted: clip.nativeAudio===false, nativeDialogue: clip.nativeDialogue === true, sourceIn: 0, duration, transition: "cut", text: "" }); coverage += duration;
     }
     if (coverage < scene.durationSeconds - 0.05 && scene.imageAssetId) clips.push({ id: randomUUID(), sceneId: scene.sceneId, label: scene.title || "Scene", kind: "image", assetId: scene.imageAssetId, sourceIn: 0, duration: scene.durationSeconds - coverage, transition: "cut", text: "" });
     if (clips.length === first) editorFail(`Scene ${scene.title || scene.sceneId} has no generated visuals`);

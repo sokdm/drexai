@@ -26,8 +26,8 @@ export async function executeProductionTool(tool:{name:string;query:string},cont
  if(tool.name==="regenerate_output"){
   if(!production || !allowTimelineEdits)throw new Error("Choose an owned production and explicitly request regeneration");
   if(!production.steps.some((s:any)=>s.key===tool.query))throw new Error("Choose an existing output step key from production status");
-  const plan=await prepareProduction(userId,{projectId:String(production.projectId),settings:production.settings,sourceProductionId:String(production._id),regenerateStepKey:tool.query});
-  return {productionPlan:plan,requiresBudgetApproval:true,message:"Replacement output quoted; completed independent assets are reused. New media is not submitted until budget approval."};
+  const plan=await prepareProduction(userId,{projectId:String(production.projectId),settings:production.settings,sourceProductionId:String(production._id),regenerateStepKey:tool.query,resumeExistingVideo:true});
+  return {productionPlan:plan,requiresBudgetApproval:true,message:plan.steps.some((s:any)=>s.providerJobId)?"Recovery quoted. The saved provider job will be resumed, not resubmitted. Completed assets are kept. Review and approve the credit card before continuing.":"Replacement output quoted; completed independent assets are reused. New media is not submitted until credit approval. After this operation, the next required approval appears in chat."};
  }
  if(tool.name==="production_exports"){
   if(!production)throw new Error("Choose an owned production first");
@@ -39,7 +39,7 @@ export async function executeProductionTool(tool:{name:string;query:string},cont
      if (!production) throw new Error("Choose an owned Studio production before using production tools");
      await StudioEvent.create({ productionId: production._id, userId: userId, level: "processing", message: "AI Director tool: " + tool.name });
      if(tool.name==="inspect_quality"){const {inspectProductionQuality}=await import("./productionQuality.js");result=await inspectProductionQuality(userId,String(production._id));}
-     else if (tool.name === "inspect_production") result = { id: production._id, status: production.status, steps: production.steps.map((s: any) => ({ key:s.key,label: s.label, status: s.status, error: s.error,credits:s.credits })) };
+     else if (tool.name === "inspect_production") result = { id: production._id, status: production.status, steps: production.steps.map((s: any) => ({ key:s.key,label: s.label, status: s.status, error: s.error,credits:s.credits,model:s.input.model })) };
      else if (tool.name === "list_assets") result = await MediaAsset.find({ userId: userId, productionId: production._id, deletedAt: null }).select("type sceneId durationSeconds metadata.name").lean();
      else if (tool.name === "list_asset_packs") { const { AssetPack } = await import("../routes/assetPacks.js"); result = await AssetPack.find({ active:true }).select("name kind license").limit(50).lean(); }
      else {

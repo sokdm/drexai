@@ -16,7 +16,7 @@ import { EditorPlayer } from "./EditorPlayer";
 import { StudioPreview } from "./StudioPreview";
 
 const fieldClass = "focus-ring mt-1 h-10 w-full rounded-md border border-line bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900";
-const defaults = { agentSelectModels:true,autoExport:true, imageModel: "openrouter/black-forest-labs/flux-3-image-klein", videoModel: "openrouter/alibaba/wan-3.0", voiceModel: "openrouter/elevenlabs/eleven-flash-v2.5", aspectRatio: "16:9", resolution: "1K", quality: "720p", voiceId: "george", language: "English", style: "cinematic", narration: true, video: true, targetSeconds: 60, maxClipsPerScene: 3, characterVoices: {} as Record<string, string> };
+const defaults = { videoModelManual:false,sceneVideoModels:{} as Record<string,string>,agentSelectModels:true,autoExport:true, imageModel: "openrouter/black-forest-labs/flux-3-image-klein", videoModel: "openrouter/bytedance/seedance-1-5-pro", voiceModel: "openrouter/elevenlabs/eleven-flash-v2.5", aspectRatio: "16:9", resolution: "1K", quality: "720p", voiceId: "george", language: "English", style: "cinematic", narration: true, video: true, targetSeconds: 60, maxClipsPerScene: 3, characterVoices: {} as Record<string, string> };
 const eventColors: Record<string, string> = { waiting: "text-amber-400", processing: "text-sky-400", success: "text-emerald-400", failure: "text-red-400", cancelled: "text-zinc-400" };
 
 export function AIStudioPage() {
@@ -81,7 +81,7 @@ export function AIStudioPage() {
         setProjectId(String(data.production.projectId));
         if (initial) {
           setMaxCredits(data.production.maxCredits || data.production.estimate.credits || 0);
-          setSettings({ ...defaults, ...data.production.settings,agentSelectModels:true,autoExport:Boolean(data.production.settings?.autoExport) });
+          setSettings({ ...defaults, ...data.production.settings,videoModelManual:data.production.settings?.videoModelManual??data.production.settings?.agentSelectModels===false,agentSelectModels:true,autoExport:Boolean(data.production.settings?.autoExport) });
           initial = false;
         }
       } catch (err) { if (alive) setError(err instanceof Error ? err.message : "Could not load production"); }
@@ -183,7 +183,7 @@ export function AIStudioPage() {
           <Select label="Image model" value={settings.imageModel} options={config?.imageModels.map((m: any) => m.id) ?? []} onChange={v => setSettings({ ...settings, imageModel: v, resolution: config.imageModels.find((m: any) => m.id === v).resolutions[0] })} />
           <Select label="Image resolution" value={settings.resolution} options={imageModel?.resolutions ?? []} onChange={v => setSettings({ ...settings, resolution: v })} />
           <Select label="Aspect ratio" value={settings.aspectRatio} options={["16:9", "9:16"]} onChange={v => setSettings({ ...settings, aspectRatio: v })} />
-          <Select label="Video model" value={settings.videoModel} options={config?.videoModels.map((m: any) => m.id) ?? []} onChange={v => setSettings({ ...settings, videoModel: v })} />
+          <Select label="Video model" value={settings.videoModel} options={config?.videoModels.map((m: any) => m.id) ?? []} onChange={v => setSettings({ ...settings, videoModel: v,videoModelManual:true,sceneVideoModels:{} })} />
           <Select label="Video quality" value={settings.quality} options={config?.videoModels.find((m: any) => m.id === settings.videoModel)?.qualities ?? []} onChange={v => setSettings({ ...settings, quality: v })} />
           <Select label="Voice model" value={settings.voiceModel} options={config?.voiceModels.map((m: any) => m.id) ?? []} onChange={v => { const model = config.voiceModels.find((m: any) => m.id === v); setSettings({ ...settings, voiceModel: v, voiceId: model.voices[0], language: model.languages[0], characterVoices: {} }); }} />
           <Select label="Narrator voice" value={settings.voiceId} options={voiceModel?.voices ?? []} onChange={v => setSettings({ ...settings, voiceId: v })} />
@@ -201,7 +201,7 @@ export function AIStudioPage() {
         {production?.status === "draft" && !production?.snapshot?.manual && <details open={production.estimate.missingPricing.length>0} aria-label="Production quote" className="border-y border-line py-4 dark:border-slate-800">
           <summary className="font-bold">Production operations</summary>
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">{[["Images", production.estimate.images], ["Speech segments", production.estimate.audioSegments], ["Max clips", production.estimate.maxClips], ["Max video seconds", production.estimate.maxVideoSeconds]].map(([label, value]) => <div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 text-lg font-semibold">{value}</dd></div>)}</dl>
-          <p className="mt-3 text-sm text-slate-500">{production.estimate.coverage}</p>
+          <p className="mt-3 text-sm text-slate-500">{production.estimate.coverage}</p>{production.estimate.modelSelections?.some((s:any)=>s.kind==="scene-video")&&<details className="mt-3"><summary>Scene model choices</summary>{production.estimate.modelSelections.filter((s:any)=>s.kind==="scene-video").map((s:any)=><p key={s.sceneId} className="mt-2 text-sm">{s.model.replace("openrouter/","")} - {s.reason}</p>)}</details>}
           {production.estimate.missingPricing.length > 0 ? <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Pricing unavailable: {production.estimate.missingPricing.join(", ")}</p> : <p className="mt-4 text-sm">Each operation shows its own credit approval in chat. Nothing starts until you approve.</p>}
           <p className="mt-3 text-sm">Review and approve generation operations inside the AI chat.</p>{production.estimate.missingPricing.length>0&&config?.voiceModels?.some((m:any)=>m.id==="openrouter/elevenlabs/eleven-flash-v2.5")&&<button disabled={busy} onClick={()=>void act(async()=>{const revised={...settings,voiceModel:"openrouter/elevenlabs/eleven-flash-v2.5",voiceId:"george",characterVoices:{}};setSettings(revised);const data=await api<any>("/api/studio/plans",{method:"POST",body:JSON.stringify({projectId,settings:revised})});setParams({projectId,productionId:data.production._id});})}>Quote ElevenLabs narration instead (review new price)</button>}
         </details>}

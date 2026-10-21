@@ -15,7 +15,7 @@ import { studioLog } from "./studioExecution.js";
 function fail(message:string,statusCode=400):never{throw Object.assign(new Error(message),{statusCode});}
 const idSchema=z.string().regex(/^[a-f\d]{24}$/i,"Invalid ID");
 export async function prepareProduction(userId:string,body:unknown,allowDraftPlanning=false,agentTaskId?:string){
-  const input = z.object({ projectId: idSchema, settings: studioSettingsSchema, sourceProductionId: idSchema.optional(), regenerateStepKey: z.string().max(150).optional() }).parse(body);
+  const input = z.object({ projectId: idSchema, settings: studioSettingsSchema, sourceProductionId: idSchema.optional(), regenerateStepKey: z.string().max(150).optional(),resumeExistingVideo:z.boolean().default(false) }).parse(body);
   if(agentTaskId&&!input.sourceProductionId){const existing=await StudioProduction.findOne({userId,"snapshot.agentTaskId":agentTaskId});if(existing){if(String(existing.projectId)!==input.projectId)fail("This agent request already belongs to another project",409);return existing;}}
   const project = await AIProject.findOne({ _id: input.projectId, userId: userId }).lean();
   if (!project || !project.approvedAt && !allowDraftPlanning) fail("Approve the script before creating a production plan");
@@ -55,10 +55,16 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
   if (source) {
     const selected = source.steps.find((s: StudioStep) => s.key === input.regenerateStepKey);
     if (!selected) fail("Select an output to regenerate");
+    let resumableJob:string|undefined;
+    if(input.resumeExistingVideo&&selected.kind==='video'&&['failed','needs_review'].includes(selected.status)){
+      const {StudioVideoReceipt}=await import('../models/StudioVideoReceipt.js');const receipt=await StudioVideoReceipt.findOne({productionId:source._id,userId,stepKey:selected.key,rejected:{$ne:true}}).lean();resumableJob=selected.providerJobId||receipt?.operationName;
+      if(selected.failedProviderJobIds?.includes(resumableJob))resumableJob=undefined;
+    }
     for (const step of steps) {
+      if(step.key===selected.key&&resumableJob){step.input={...selected.input};step.providerJobId=resumableJob;}
       const old = source.steps.find((s: StudioStep) => s.key === step.key);
       const dependsOnSelection = step.key === selected.key || (step.sceneId === selected.sceneId && step.kind === "video" && selected.kind !== "video");
-      if (old?.status === "completed" && old.assetId && !dependsOnSelection && (step.kind !== "video" || old.input.nativeAudio === true) && (step.kind !== "audio" || old.input.track === step.input.track)) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
+      if (old?.status === "completed" && old.assetId && !dependsOnSelection && (step.kind !== "video" || old.input.nativeAudio === true || old.input.nativeAudio === false && step.input.nativeAudio === false && !step.input.nativeDialogue) && (step.kind !== "audio" || old.input.track === step.input.track)) { step.status = "completed"; step.assetId = old.assetId; step.reused = true; }
     }
   }
   const estimate:any = await priceStudioSteps(steps);estimate.modelSelections=modelSelections.map(({alternatives,...selection})=>selection);
@@ -97,6 +103,7 @@ export async function controlProduction(userId:string,productionId:string,body:u
     } finally { await session.endSession(); }
   } else {
     if (!["paused", "failed"].includes(production.status)) fail("Only paused or failed work can resume. Uncertain provider requests require a new regeneration quote.");
+    if(!await (await import("../models/CreditReservation.js")).CreditReservation.exists({_id:production.reservationId,userId,status:"reserved"}))fail("Approve a fresh recovery quote inside chat before continuing",409);
     if(production.approvalMode==="cards"){
       const {CreditApproval}=await import("../models/CreditApproval.js");const {CreditReservation}=await import("../models/CreditReservation.js");
       if(!await CreditApproval.exists({_id:production.activeApprovalId,userId,status:"approved"})||!await CreditReservation.exists({_id:production.reservationId,userId,status:"reserved"}))fail("Approve the next operation inside chat before continuing");

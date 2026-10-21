@@ -7,8 +7,10 @@ import { ttsModels, validateTtsSettings } from "./textToSpeech.js";
 
 export const studioSettingsSchema = z.object({
   agentSelectModels:z.boolean().default(false),
+  videoModelManual:z.boolean().default(false),
+  sceneVideoModels:z.record(z.string(),z.string()).default({}),
   imageModel: z.string().default(env.OPENROUTER_API_KEY ? imageModels[0].id : imageModels.find(m => !m.id.startsWith("openrouter/"))!.id),
-  videoModel: z.string().default(env.OPENROUTER_API_KEY ? videoModels[0].id : videoModels.find(m => !m.id.startsWith("openrouter/"))!.id),
+  videoModel: z.string().default("openrouter/bytedance/seedance-1-5-pro"),
   voiceModel: z.string().default(env.OPENROUTER_API_KEY ? ttsModels[0].id : ttsModels.find(m => !m.id.startsWith("openrouter/"))!.id),
   aspectRatio: z.enum(["16:9", "9:16"]).default("16:9"),
   resolution: z.string().default("1K"),
@@ -28,7 +30,7 @@ export type StudioStep = {
   key: string; sceneId: string; sceneOrder: number; kind: "image" | "audio" | "video";
   label: string; input: Record<string, any>; status: "pending" | "requesting" | "completed" | "skipped" | "failed" | "needs_review";
   credits: number; pricing?: Record<string, any>; assetId?: string; providerJobId?: string;
-  executionModel?:string;stored?: Record<string, any>; error?: string; charged?: boolean; reused?: boolean; failedProviderJobIds?: string[];
+  providerPhase?:string; submissionStartedAt?:string; executionModel?:string;stored?: Record<string, any>; error?: string; charged?: boolean; reused?: boolean; failedProviderJobIds?: string[];
 };
 export type StudioSnapshot = { title: string; scenes: any[]; characters: any[]; niche?: any; summary?: string; product?: { name: string; benefits: string; assetIds: string[] } };
 
@@ -67,8 +69,10 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
     });
   }
   if (settings.video) for (const scene of scenes) {
+    const sceneModel=settings.sceneVideoModels?.[String(scene._id)]||settings.videoModel;
+    if(!videoModels.some(m=>m.id===sceneModel))throw new Error("Unsupported scene video model");
     if (!scene.videoMotionPrompt?.trim()) throw new Error(`Scene ${scene.order} needs a motion prompt`);
-    const modelDurations=videoModels.find(m => m.id === settings.videoModel)!.durations;
+    const modelDurations=videoModels.find(m => m.id === sceneModel)!.durations;
     const requestedDuration=Math.max(1,Number(scene.estimatedDurationSeconds)||settings.targetSeconds/scenes.length);
     const idealLength=Math.max(modelDurations[0],Math.ceil(requestedDuration/settings.maxClipsPerScene));
     const lines = sceneDialogue(scene);
@@ -84,9 +88,9 @@ export function buildStudioSteps(snapshot: StudioSnapshot, settings: StudioSetti
     for (let index = 0; index < count; index++) add(scene, "video", `-${index}`, validateVideoSettings({
       ...scene, motionPrompt: scene.videoMotionPrompt, dialogueLines: segments[index] ?? [],
       characterDescriptions: characters.map(c => `${c.name}: ${c.appearance || ""}; ${c.clothing || ""}; voice guidance: ${c.voiceDescription || c.personality || "natural"}`).join("\n"),
-      sourceImageAssetId: "resolved-at-execution", model: settings.videoModel, aspectRatio: settings.aspectRatio,
-      durationSeconds:lines.length?durationSeconds:([...modelDurations].sort((a,b)=>a-b).find(n=>n>=Math.min(durationSeconds,requestedSeconds-index*durationSeconds))||durationSeconds), quality: settings.quality, quantity: 1, clipIndex: index, nativeAudio: true, nativeDialogue: lines.length > 0
-    }), `video and native audio ${index + 1}`);
+      sourceImageAssetId: "resolved-at-execution", model: sceneModel, aspectRatio: settings.aspectRatio,
+      durationSeconds:lines.length?durationSeconds:([...modelDurations].sort((a,b)=>a-b).find(n=>n>=Math.min(durationSeconds,requestedSeconds-index*durationSeconds))||durationSeconds), quality: settings.quality, quantity: 1, clipIndex: index, nativeAudio: scene.audioMode!=="silent", nativeDialogue: lines.length > 0
+    }), `${scene.audioMode==='silent'?'silent video':'video and native audio'} ${index + 1}`);
 
   }
   return steps;

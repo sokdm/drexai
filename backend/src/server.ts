@@ -1,3 +1,4 @@
+import {privateAiCosts} from './middleware/privateAiCosts.js';
 import {requestProtection} from './middleware/requestProtection.js';
 import {startAgentTaskWorker} from "./services/agentStory.js";
 import { startRenderFallback } from "./services/renderFallback.js";
@@ -49,7 +50,7 @@ app.use(helmet({ contentSecurityPolicy: { directives: { "script-src": ["'self'",
 app.use(cors({ origin: env.CLIENT_ORIGIN, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
-app.use("/api", requestProtection, platformGate);
+app.use("/api", requestProtection, privateAiCosts, platformGate);
 app.get("/api/platform-status", async (req, res) => { const c = await PlatformControl.findById("platform"); const admin = await adminIdentity(req); const website = await WebsiteSettings.findById("public").select("siteName description supportEmail -_id").lean(); res.json({ website, maintenance: !!c?.maintenance && !admin, message: c?.message || "We will be back shortly." }); });
 app.use("/api/admin", adminRouter);
 app.use("/api/health", healthRouter);
