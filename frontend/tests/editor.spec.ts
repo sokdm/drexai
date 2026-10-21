@@ -114,3 +114,15 @@ test('stalled preview stops with a recovery message instead of buffering forever
  await expect(page.getByText(/Video loading stalled/)).toBeVisible({timeout:22000});
  await expect(page.getByRole('button',{name:'Play rough cut',exact:true})).toBeVisible();
 });
+
+for(const width of [390,1024,1440])test('editor workspace stays bounded at '+width+'px',async({page})=>{
+ await page.setViewportSize({width,height:900});await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+ if(width>=1000){const body=await page.locator('.editor-body').boundingBox(),timeline=await page.getByRole('region',{name:'Editing timeline',exact:true}).boundingBox();expect(body!.height).toBeLessThan(820);expect(timeline!.y+timeline!.height).toBeLessThanOrEqual(900);}
+ await page.getByRole('button',{name:'effects',exact:true}).click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
+});
+
+test('editor assistant sends on Enter, clears composer, applies a real proposal and restores conversation',async({page})=>{
+ const state=await editorApi(page);let calls=0;await page.route('**/api/editor/edits/'+editId+'/command',route=>{calls++;const body=route.request().postDataJSON();expect(body.message).toBe('Smooth the joins');const explanation='Applied dissolve joins without shifting audio.';state.edit.assistantMessages=['You: '+body.message,explanation];return route.fulfill({json:{timeline:{...body.timeline,clips:body.timeline.clips.map((c:any,i:number)=>({...c,transition:i===0?'dissolve':'cut'}))},explanation,note:'Review or save the change.'}});});
+ await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();await page.getByLabel('Editing command',{exact:true}).fill('Smooth the joins');await page.getByLabel('Editing command',{exact:true}).press('Enter');await expect(page.getByLabel('Editing command',{exact:true})).toHaveValue('');await expect(page.getByRole('log')).toContainText('Applied dissolve');expect(calls).toBe(1);await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');await page.reload();await expect(page.getByRole('log')).toContainText('Applied dissolve');
+});

@@ -83,3 +83,14 @@ test('paid-only chat survives a definite 502 using an approved compatible fallba
  assert.equal(result,'Analysis completed');assert.deepEqual(calls,['fixture/story-paid','fixture/story-backup']);const after=await Wallet.findOne({userId:user._id});assert.equal(after.availableCredits,before.availableCredits);
  }finally{globalThis.fetch=normal;}
 });
+
+test('series parts preserve continuity, require prior export, and create one pending approval without paid calls',async()=>{
+ const {seriesRequest,nextSeriesTask}=await import('../dist/services/storySeries.js');const {CharacterProfile}=await import('../dist/models/CharacterProfile.js');const {VideoExport}=await import('../dist/models/VideoEdit.js');
+ const series=seriesRequest('Create seasons 1-6 of an original film, 60 seconds each','series-fixture');assert.equal(series.total,6);assert.equal(series.part,1);assert.throws(()=>seriesRequest('Create 99 seasons','bad'));
+ const project=await AIProject.create({userId:user._id,title:'Part one',summary:'Kofi finds a key. A hidden door begins to open.',prompts:{sourceSettings:{storyTopic:series.bible,sceneCount:3,targetDuration:'60 seconds',series}},scenes:[scene(1)]});
+ const ref=new mongoose.Types.ObjectId();await CharacterProfile.create({userId:user._id,projectId:project._id,name:'Kofi',appearance:'Short hair and a scar',clothing:'Blue coat',referenceAssetId:ref});
+ await assert.rejects(()=>nextSeriesTask(String(user._id),String(project._id)),/Complete an export/);
+ await VideoExport.create({userId:user._id,projectId:project._id,editId:new mongoose.Types.ObjectId(),revision:0,timeline:{},settings:{},status:'completed'});
+ const before=await Wallet.findOne({userId:user._id});const first=await nextSeriesTask(String(user._id),String(project._id)),again=await nextSeriesTask(String(user._id),String(project._id));assert.equal(String(first._id),String(again._id));assert.equal(first.status,'awaiting_approval');assert.equal(first.input.settings.series.part,2);assert.equal(first.input.settings.targetDuration,'60 seconds');assert.equal(first.input.settings.series.characters[0].referenceAssetId,String(ref));assert.match(first.input.settings.series.previousSummary,/hidden door/);assert.equal((await Wallet.findOne({userId:user._id})).availableCredits,before.availableCredits);assert.equal(externalCalls,0);
+ await assert.rejects(()=>nextSeriesTask(String(new mongoose.Types.ObjectId()),String(project._id)),/Project not found/);
+});

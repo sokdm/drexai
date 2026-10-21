@@ -2,8 +2,21 @@ import { randomUUID } from "node:crypto";
 import { timelineSchema, timelineDuration, type EditorTimeline } from "@drex/shared";
 export function editingCommand(input: EditorTimeline, message: string, captions: any[] = []) {
  const timeline = timelineSchema.parse(structuredClone(input)), text = message.trim().toLowerCase(); let result: EditorTimeline = timeline, explanation = "";
- if (/silent|silence|speed/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made.");
- if (/zoom in|slow zoom|pan left|pan right/.test(text)) {
+ if (/silent|silence/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made.");
+ if (/smooth|seamless|join|joing|blend|dissolve|cross.?fade|better animations/.test(text)) {
+  result.clips=result.clips.map((c,i)=>({...c,transition:i<result.clips.length-1?'dissolve':'cut'}));
+  explanation='Applied real dissolve joins without shortening the timeline or shifting dialogue/captions. Each boundary blends the preceding final frame into the next shot. Review visual continuity; unrelated poses or camera angles can still reveal a cut.';
+ } else if (/speed|slow motion|faster|slower/.test(text)) {
+  const speed=Number(text.match(/([0-9]+(?:\.[0-9]+)?)\s*x/)?.[1]||(/slow/.test(text)?'.75':'1.25'));
+  if(speed<.25||speed>4)throw new Error('Choose playback speed between 0.25x and 4x.');
+  // Keep clip boundaries and anchored speech stable; faster clips need sufficient source handles.
+  result.clips=result.clips.map(c=>c.kind==='video'?{...c,speed}:c);
+  explanation='Updated video playback speed while keeping timeline boundaries. Source handles are validated before applying; separately generated speech remains unchanged.';
+ } else if (/outro|to be continued/.test(text)) {
+  const title=/to be continued/.test(text)?'To be continued?':message.match(/["\u201c](.+?)["\u201d]/)?.[1]||'Thanks for watching';
+  result.clips.push({id:randomUUID(),label:'Outro',kind:'title',sourceIn:0,duration:3,transition:'fade',fit:'contain',text:title.slice(0,150),textStyle:{font:'Arial',size:48,position:'center',preset:'bold',animation:'fade'}});
+  explanation='Added an editable movie outro title. Existing clips, dialogue and captions were preserved.';
+ } else if (/zoom in|slow zoom|pan left|pan right/.test(text)) {
   result.clips = result.clips.map(c => ({ ...c, keyframes: [{ time: 0, zoom: /pan/.test(text) ? 1.3 : 1, x: /pan left/.test(text) ? 1 : /pan right/.test(text) ? 0 : .5, y: .5 }, { time: c.duration, zoom: /pan/.test(text) ? 1.3 : 1.2, x: /pan left/.test(text) ? 0 : /pan right/.test(text) ? 1 : .5, y: .5 }] }));
   explanation = "Saved interpolated pan/zoom keyframes on each clip. Preview or undo the motion before exporting. This motion does not detect or track speakers.";
  } else if (/professional/.test(text)) {

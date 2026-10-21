@@ -1,3 +1,5 @@
+import {timelineDuration} from "@drex/shared";
+import {randomUUID} from "node:crypto";
 import {executeTimelineTool} from "./editorToolExecution.js";
 import { VideoEdit } from "../models/VideoEdit.js";
 import { AIProject } from "../models/AIProject.js";
@@ -12,7 +14,10 @@ export async function ensureProductionEdit(production: any) {
  if (!edit) {
   let timeline = roughCut(production);
   const assets = await validateTimelineAssets(timeline, userId);
+  timeline.clips=timeline.clips.map((c,i)=>({...c,transition:i<timeline.clips.length-1?'dissolve':'cut'}));
   timeline.captions = captionsFromTranscript(timeline, assets);
+  const project=await AIProject.findOne({_id:production.projectId,userId});const series=project?.prompts?.sourceSettings?.series;
+  if(series&&series.part<series.total){const total=timelineDuration(timeline);if(total>2)timeline.captions.push({id:randomUUID(),text:'To be continued...',start:total-2,end:total,style:{font:'Arial',size:44,position:'top',preset:'boxed',animation:'fade'}});}
   await validateTimelineAssets(timeline, userId);
   edit = await VideoEdit.findOneAndUpdate({ userId, productionId: production._id }, { $setOnInsert: { userId, productionId: production._id, projectId: production.projectId, title: production.title || "Untitled edit", timeline, revision: 0 } }, { upsert: true, new: true });
  }

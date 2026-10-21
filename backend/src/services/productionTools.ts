@@ -22,7 +22,7 @@ export async function prepareProduction(userId:string,body:unknown,allowDraftPla
   const characters = await CharacterProfile.find({ projectId: project!._id, userId: userId }).lean();
   const refs = [];
   for (const character of characters) {
-    const reference = character.referenceImageUrl ? await MediaAsset.findOne({ userId: userId, type: "image", deletedAt: null, url: character.referenceImageUrl }).select("_id") : null;
+    const reference = character.referenceAssetId ? await MediaAsset.findOne({_id:character.referenceAssetId,userId,type:"image",deletedAt:null}).select("_id") : character.referenceImageUrl ? await MediaAsset.findOne({ userId: userId, type: "image", deletedAt: null, url: character.referenceImageUrl }).select("_id") : null;
     refs.push({ ...character, referenceAssetId: reference ? String(reference._id) : undefined });
   }
   const niche = project!.nicheId ? await Niche.findOne({ _id: project!.nicheId, userId: userId }).lean() : null;

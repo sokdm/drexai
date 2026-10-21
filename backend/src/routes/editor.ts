@@ -110,6 +110,7 @@ editorRouter.post("/edits/:id/command", rateLimit({ windowMs: 60000, limit: 6 })
  if (input.revision !== edit.revision) editorFail("This edit changed in another tab. Reload before applying a command.", 409);
  try{await admitChatMessage(String(req.user._id));}catch(e:any){return res.status(e.statusCode||503).json({error:publicChatError(e),resetsAt:e.resetsAt});}
  let result;try{result=await executeTimelineTool(String(req.user._id),input.message,input.timeline);}catch(e:any){if(/configured|credentials|redis|provider|api[_ -]?key|ffmpeg.*(?:missing|not found|unavailable)/i.test(e.message))return res.status(503).json({error:publicChatError(e)});throw e;}
+ await VideoEdit.updateOne({_id:edit._id,userId:req.user._id},{$push:{assistantMessages:{$each:["You: "+input.message,result.explanation],$slice:-100}}});
  // Return a revision-bound proposal; the existing undo/save workflow owns commit.
  res.json({ ...result, revision: edit.revision, note: "Applied to the editor preview. Undo or save this change using the existing timeline controls. No AI provider request or credit charge was made." });
 }));

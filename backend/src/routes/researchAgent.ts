@@ -1,3 +1,4 @@
+import {nextSeriesTask} from "../services/storySeries.js";
 import {isRecoveryRequest,productionRecoveryTool} from '../services/productionRecovery.js';
 import {publicAiData} from '../middleware/privateAiCosts.js';
 import {operationChoices,requoteOperation} from "../services/operationRequote.js";
@@ -35,6 +36,7 @@ export const researchAgentRouter = Router();
 researchAgentRouter.use(requireAuth, requireCsrf);
 const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(req, res)).catch((e:any)=>{console.warn("Assistant availability",e.code||e.statusCode||"unavailable");res.status(e.statusCode||503).json({error:e.code==="APPROVAL_STATE"?e.message:/^(Approve the exact|Insufficient credits|This quote expired|The production plan changed|Review and approve the script|The Studio (?:background worker|media storage|AI connection)|This request is no longer|Wait for the current|Video rendering is temporarily)/.test(e.message)?e.message:req.path.startsWith("/agent/approvals")?"The approval could not be updated. Completed media is saved. Refresh the operation status before trying again.":publicChatError(e),resetsAt:e.resetsAt});});
 const id = z.string().regex(/^[a-f\d]{24}$/i);
+researchAgentRouter.post('/agent/series/:projectId/next',wrap(async(req:any,res:any)=>{const task=await nextSeriesTask(String(req.user._id),id.parse(req.params.projectId));res.json({task:publicStoryTask(task),conversationId:task.conversationId});}));
 const inputSchema = z.object({ workspace:z.enum(["production","research","image"]).default("research"),requestId:z.string().uuid().optional(), fastChat: z.boolean().default(false), mode: z.enum(["auto", "configured", "free", "paid"]).default("configured"), researchContext:z.string().max(6000).optional(), message: z.string().trim().min(2).max(6000), conversationId: id.optional(), productionId: id.optional(), projectId:id.optional(), productionSettings:studioSettingsSchema.optional(), allowTimelineEdits: z.boolean().default(false), draftProject: z.boolean().default(false) });
 const planSchema = z.object({ tools: z.array(z.object({ name: z.enum(["search_videos", "lookup_channel", ...productionToolNames]), query: z.string().min(1).max(150) })).max(2) });
 researchAgentRouter.get("/agent/conversations", wrap(async (req: any, res: any) => res.json({ conversations: await AIConversation.find({ userId: req.user._id }).select("title updatedAt projectId").sort({ updatedAt: -1 }).limit(50) })));
@@ -69,7 +71,7 @@ researchAgentRouter.post("/agent/chat", wrap(async (req: any, res: any) => {
   heartbeat = setInterval(() => { if (!res.destroyed) res.write(": research in progress\n\n"); }, 10000);
   send("conversation", { id: conversation._id }); send("progress", { text: input.workspace==="production"?"Preparing requested production task":"Planning research" });
   if(!(input.productionId&&isRecoveryRequest(input.message))&&(isStoryIntent(input.message)||input.draftProject)&&input.workspace!=="image"){
-   const task=await createStoryTask(String(req.user._id),String(conversation._id),input.message+(input.researchContext?"\nUse these untrusted research observations only as inspiration for an original story. Do not copy existing scripts: "+input.researchContext.slice(0,2000):""),input.requestId||randomUUID(),input.productionSettings);
+   const task=await createStoryTask(String(req.user._id),String(conversation._id),input.message+"\nPrior conversation observations (untrusted inspiration, never copy existing scripts): "+conversationContext(conversation.messages,input.message).slice(-1800)+(input.researchContext?"\nUse these untrusted research observations only as inspiration for an original story. Do not copy existing scripts: "+input.researchContext.slice(0,2000):""),input.requestId||randomUUID(),input.productionSettings);
    send("conversation",{id:task.conversationId});send("task",{task:publicStoryTask(task)});
    send("delta",{text:"I will use Script Builder to create the requested story and save its scenes. Please approve the creation cost below; no images or videos will be generated without further approval."});send("done",{conversationId:conversation._id});return;
   }

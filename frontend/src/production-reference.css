@@ -42,3 +42,29 @@
 @media(max-width:999px){.studio-workspace .studio-columns.studio-with-left.studio-with-right{grid-template-columns:minmax(0,1fr)}.studio-workspace .studio-project{max-height:300px;overflow:auto}.studio-workspace .studio-center{max-height:75dvh;overflow:auto}.studio-workspace .studio-activity{height:clamp(380px,75dvh,650px);max-height:none;grid-column:1/-1}.studio-workspace .studio-director-panel .agent-workspace{height:100%;min-height:0!important}.studio-workspace .studio-footer{position:relative}.studio-workspace .creator-mode-tabs{position:static;transform:none;max-width:100%;white-space:normal}}
 
 .agent-inline-history{display:flex;flex:0 0 auto;gap:8px;min-width:0;padding:7px;border-bottom:1px solid #64748b33}.agent-inline-history button{font-size:11px;white-space:nowrap}.agent-inline-history select{min-width:0;max-width:100%;flex:1;font-size:11px;background:transparent;border:1px solid #64748b55;border-radius:6px;padding:5px}
+
+/* Bounded editor workspace: content scrolls inside its owning panel. */
+.video-editor,.video-editor *{box-sizing:border-box;min-width:0}
+.video-editor{width:100%;max-width:100%;overflow-x:clip}
+.video-editor .editor-header{gap:8px}.video-editor .editor-header>div:not(.editor-actions){flex:1;min-width:120px}.video-editor .editor-header h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.video-editor .editor-header>select{max-width:240px}.video-editor .editor-message{margin:0 0 8px;padding:8px 12px;font-size:12px;flex-shrink:0;overflow-wrap:anywhere}
+.video-editor .editor-body{min-height:0;min-width:0;max-width:100%}
+.video-editor .editor-panel{min-height:0;min-width:0;overflow-wrap:anywhere}
+.video-editor .editor-timeline-scroll{width:100%;min-height:120px;max-height:100%;overflow:auto}.video-editor .editor-tracks{min-width:600px}
+.video-editor .editor-chat-history{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;font-size:12px}.video-editor .editor-chat-history p{padding:10px;margin:0;border-radius:8px;background:var(--ed-input);white-space:pre-wrap}
+.video-editor .editor-command-chat textarea{max-height:90px;min-height:56px;resize:vertical}.video-editor .editor-command-chat{margin-bottom:14px}
+@media(min-width:1000px){
+.video-editor{height:calc(100dvh - 88px);min-height:620px;display:flex;flex-direction:column;padding:8px;gap:0}
+.video-editor>.reference-editor-nav{display:none}.video-editor .editor-header{flex-shrink:0}
+.video-editor .editor-body{flex:1;display:grid;grid-template-columns:minmax(200px,240px) minmax(0,1fr) minmax(240px,310px);grid-template-rows:minmax(210px,1fr) minmax(160px,.65fr) auto;gap:8px;align-items:stretch;overflow:hidden}
+.video-editor .editor-library{grid-column:1;grid-row:1/4;max-height:none;height:100%;overflow:auto}
+.video-editor .editor-center{grid-column:2;grid-row:1;max-height:100%;overflow:auto;display:flex;flex-direction:column}
+.video-editor .editor-properties{grid-column:3;grid-row:1/4;max-height:none;height:100%;overflow:auto;display:block}
+.video-editor .editor-preview{height:auto!important;min-height:160px;flex:1}.video-editor .editor-panel-heading,.video-editor .editor-playback{flex-shrink:0}
+.video-editor .editor-timeline{grid-column:2;grid-row:2;width:100%;margin:0;display:flex;flex-direction:column;overflow:hidden}.video-editor .editor-timeline-scroll{flex:1;min-height:80px}
+.video-editor .editor-export{grid-column:2;grid-row:3;width:100%;max-height:150px;overflow:auto}.video-editor .editor-export h2{margin-bottom:4px}.video-editor .editor-export-settings{gap:6px}
+.video-editor .editor-music-prompt{max-height:140px;overflow:auto;flex-shrink:0}.video-editor .editor-toolbar{flex-wrap:wrap}
+}
+@media(max-width:999px){.video-editor .editor-body{grid-template-columns:minmax(0,1fr);display:grid;gap:10px}.video-editor .editor-center{grid-column:1;grid-row:1}.video-editor .editor-timeline{grid-column:1;grid-row:2;width:100%;max-height:340px}.video-editor .editor-properties{grid-column:1;grid-row:3;max-height:500px;display:block}.video-editor .editor-library{grid-column:1;grid-row:4;max-height:420px}.video-editor .editor-export{grid-column:1;grid-row:5;width:100%;max-height:none}.video-editor .editor-preview{height:280px!important}.video-editor .editor-header{justify-content:flex-start}.video-editor .editor-header h1{white-space:normal}.video-editor .editor-playback output{font-size:11px;white-space:nowrap}}
+
+.video-editor .editor-zoom{display:flex;align-items:center;gap:8px;white-space:nowrap;flex:0 0 150px;overflow-wrap:normal}.video-editor .editor-zoom input{width:110px;min-width:50px}.video-editor .editor-timeline-clip.selected{background:#36456b;color:#fff}.video-editor .editor-library section>button{margin:2px}

@@ -1,3 +1,4 @@
+import {CharacterProfile} from "../models/CharacterProfile.js";
 import {sceneDialogue} from './sceneAudio.js';
 import {StudioVideoReceipt} from '../models/StudioVideoReceipt.js';
 import {CreditApproval} from "../models/CreditApproval.js";
@@ -133,6 +134,9 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         if (!output) {
           const input: any = { ...step.input, userId: String(production.userId),reservationId:String(production.reservationId) };
           if (step.kind === "image") {
+            const scene=production.snapshot.scenes.find((s:any)=>String(s._id)===step.sceneId);
+            const profiles=await CharacterProfile.find({projectId:production.projectId,userId:production.userId,name:{$in:scene?.characters||[]}}).lean();
+            if((await import('./imageGeneration.js')).imageModels.find(m=>m.id===input.model)?.characterReference)input.characterReferenceIds=[...new Set([...(input.characterReferenceIds||[]),...profiles.map(c=>c.referenceAssetId?String(c.referenceAssetId):null).filter(Boolean)])].slice(0,4);
             input.referenceImages = [];
             for (const ref of input.characterReferenceIds ?? []) {
               const source = await ownedAsset(production, ref);
@@ -196,6 +200,10 @@ export async function runStudioProduction(id: string, providers: StudioProviders
         } }, { upsert: true, new: true });
       }
       await settleStudioStep(String(production.reservationId), step.key, step.credits, { productionId: id, sceneId: step.sceneId, assetId: asset._id, providerUsage: asset.metadata?.providerUsage, estimatedProviderCostUsd: step.pricing?.providerCostUsd });
+      if(step.kind==='image'){
+        const scene=production.snapshot.scenes.find((s:any)=>String(s._id)===step.sceneId);
+        await CharacterProfile.updateMany({projectId:production.projectId,userId:production.userId,name:{$in:scene?.characters||[]},referenceAssetId:{$exists:false},$or:[{referenceImageUrl:{$exists:false}},{referenceImageUrl:''}]},{$set:{referenceAssetId:asset._id}});
+      }
       step.assetId = String(asset._id); step.charged = true; step.status = "completed"; step.error = undefined;
       await checkpoint();
       await studioLog(production, "success", `${step.label} ready.`, step.key);

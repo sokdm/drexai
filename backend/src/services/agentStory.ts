@@ -1,3 +1,4 @@
+import {seriesRequest} from "./storySeries.js";
 import mongoose from "mongoose";
 import {randomUUID} from "node:crypto";
 import {z} from "zod";
@@ -16,13 +17,13 @@ export function storyArguments(message:string){
  const words=["one","two","three","four","five","six","seven","eight","nine","ten"];
  const sceneCount=count?(Number(count[1])||words.indexOf(count[1].toLowerCase())+1):3;
  const duration=message.match(/\b(\d{1,3})[ -](seconds?|minutes?)\b/i);
- return scriptSettings.parse({storyTopic:message,sceneCount:Math.min(40,Math.max(1,sceneCount)),targetDuration:duration?duration[1]+" "+duration[2]:sceneCount*30+" seconds",audioMode:/\b(no narration|without narration|dialogue only|dialogue-only|only dialogue)\b/i.test(message)?"dialogue":/\b(silent|no speech|no spoken)\b/i.test(message)?"silent":/\b(narration|narrated|voiceover)\b/i.test(message)?"mixed":"auto",modelMode:"auto",type:"Video production"});
+ return scriptSettings.parse({storyTopic:message.slice(0,6000),sceneCount:Math.min(40,Math.max(1,sceneCount)),targetDuration:duration?duration[1]+" "+duration[2]:sceneCount*30+" seconds",audioMode:/\b(no narration|without narration|dialogue only|dialogue-only|only dialogue)\b/i.test(message)?"dialogue":/\b(silent|no speech|no spoken)\b/i.test(message)?"silent":/\b(narration|narrated|voiceover)\b/i.test(message)?"mixed":"auto",modelMode:"auto",type:"Video production"});
 }
 export function diagnoseAgent(stage:string,error:any,context:any={}){console.warn(JSON.stringify({event:"agent_failure",stage,taskId:context.taskId,requestId:context.requestId,code:error.code,status:error.status||error.statusCode,finishReason:error.finishReason,maxOutputTokens:error.maxOutputTokens,name:error.name}));}
 export async function storyQuote(userId:string,settings:any,quantity=scriptShape(settings).calls,usePaid=false){const model=await assistantModel("story_generation",usePaid?"paid":"auto",userId,quantity);const quote:any=await createQuote({feature:"story_generation",provider:"openrouter",model,quantity,settings:{scriptOutputTokens:scriptOutputBudget(settings)}});if(!quote.allowed)throw Object.assign(new Error("Script creation is temporarily unavailable. Your credits have not been charged."),{code:"SCRIPT_QUOTE_UNAVAILABLE"});return quote;}
-export async function createStoryTask(userId:string,conversationId:string,message:string,requestId:string,productionSettings?:unknown){
+export async function createStoryTask(userId:string,conversationId:string,message:string,requestId:string,productionSettings?:unknown,overrideSettings?:unknown){
  const previous=await AgentTask.findOne({userId,requestId});if(previous)return previous;
- const settings=storyArguments(message),quote=await storyQuote(userId,settings);
+ const settings=overrideSettings?scriptSettings.parse(overrideSettings):storyArguments(message);if(!settings.series)settings.series=seriesRequest(message.split("\nPrior conversation observations")[0],requestId);const quote=await storyQuote(userId,settings);
  const task=await AgentTask.create({userId,conversationId,requestId,input:{settings,productionSettings:productionSettings?studioSettingsSchema.parse(productionSettings):undefined},quote,events:[{tool:"script_builder",status:"awaiting_approval",message:"Create "+settings.sceneCount+" saved scenes. Approve "+quote.credits+" credits before the creation tool starts.",at:new Date()}]}).catch(async(error:any)=>{if(error.code===11000){const existing=await AgentTask.findOne({userId,requestId});if(existing)return existing;}throw error;});
  await AIConversation.updateOne({_id:conversationId,userId},{$push:{messages:{role:"assistant",content:"I prepared a "+settings.sceneCount+"-scene script task. Review the creation cost below. No generation has started.",metadata:{taskId:String(task._id)}}}});return task;
 }

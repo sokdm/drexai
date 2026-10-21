@@ -212,3 +212,10 @@ test('mixed-resolution source renders to the requested canvas instead of failing
  let rendered;await processVideoExport(String(job._id),{read:async()=>bytes,upload:async(file,key)=>{rendered=await probeMedia(file);return{key,bucket:'fixture'};}});
  const saved=await VideoExport.findById(job._id);assert.equal(saved.status,'completed',saved.error);assert.equal(rendered.width,854);assert.equal(rendered.height,480);
 });
+
+test('dissolve joins blend pixels without shortening video or shifting its audio clock',async()=>{
+ const dir=path.join(directory,'dissolve');await mkdir(dir);const red=path.join(dir,'red.png'),blue=path.join(dir,'blue.png');await sharp({create:{width:320,height:180,channels:3,background:'#ff0000'}}).png().toFile(red);await sharp({create:{width:320,height:180,channels:3,background:'#0000ff'}}).png().toFile(blue);
+ const timeline=timelineSchema.parse({clips:[{id:'r',assetId:'a11111111111111111111111',kind:'image',label:'red',duration:1,transition:'dissolve'},{id:'b',assetId:'b11111111111111111111111',kind:'image',label:'blue',duration:1}],audio:[],captions:[],aspectRatio:'16:9',musicDecision:'none'});const progress=[];
+ const result=await renderTimeline(timeline,{format:'mp4',resolution:'480p',quality:'draft',filename:'dissolve'},new Map([['a11111111111111111111111',red],['b11111111111111111111111',blue]]),dir,n=>progress.push(n));assert.ok(Math.abs(result.duration-2)<.15);assert.ok(result.audio);assert.ok(progress.some(n=>n>5&&n<50));
+ const frame=path.join(dir,'blend.png');await runMedia('ffmpeg',['-v','error','-y','-ss','1.13','-i',result.file,'-frames:v','1',frame]);const pixel=await sharp(frame).extract({left:400,top:200,width:1,height:1}).raw().toBuffer();assert.ok(pixel[0]>20&&pixel[2]>20,'boundary is a blend, not black or a hard cut');
+});

@@ -15,7 +15,7 @@ export const editorClipSchema = z.object({
   brightness: z.preprocess(v => v === null ? undefined : v, z.number().min(-0.5).max(0.5).optional()), contrast: z.preprocess(v => v === null ? undefined : v, z.number().min(0.5).max(2).optional()), saturation: z.preprocess(v => v === null ? undefined : v, z.number().min(0).max(2).optional()),
   sharpen: z.number().min(0).max(1.5).optional(), vignette: z.boolean().optional(),
   sourceIn: seconds.default(0), duration: z.number().finite().min(0.1).max(600),
-  transition: z.enum(["cut", "fade"]).default("cut"), fit: z.enum(["contain", "cover"]).default("contain"),
+  transition: z.enum(["cut", "fade", "dissolve"]).default("cut"), fit: z.enum(["contain", "cover"]).default("contain"),
   text: z.string().max(500).default(""), textStyle: captionStyleSchema.default({}),
 }).superRefine((clip, ctx) => {
   if (clip.kind !== "title" && !clip.assetId) ctx.addIssue({ code: "custom", message: "Select a source asset" });

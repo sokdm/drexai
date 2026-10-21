@@ -78,7 +78,22 @@ export async function renderTimeline(timeline: EditorTimeline, settings: ExportS
     const segment = `segment-${i}.mp4`; segments.push(segment);
     const frames = Math.max(1, Math.round((elapsed + clip.duration) * 30) - Math.round(elapsed * 30)); elapsed += clip.duration;
     args.push("-frames:v", String(frames), "-vf", filters, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", segment);
-    await runMedia("ffmpeg", args, { cwd: directory, signal }); onProgress(5 + (i + 1) / timeline.clips.length * 45);
+    await runMedia("ffmpeg", [...args.slice(0,-1),"-progress","pipe:1",args[args.length-1]], { cwd: directory, signal, timeoutMs:Math.max(60000,Math.min(480000,clip.duration*15000)),onProgress:seconds=>onProgress(5+(i+Math.min(1,seconds/clip.duration))/timeline.clips.length*45) }); onProgress(5 + (i + 1) / timeline.clips.length * 45);
+  }
+  if(timeline.clips.some(c=>c.transition==='dissolve')&&segments.length>1){
+    const joinArgs=[...common,'-filter_complex_threads','1'];for(const file of segments)joinArgs.push('-i',file);
+    const joins=segments.map((_,i)=>'['+i+':v]settb=AVTB,setpts=PTS-STARTPTS[s'+i+']');let label='s0',boundary=timeline.clips[0].duration;
+    for(let i=1;i<segments.length;i++){
+      const fade=Math.min(8/30,timeline.clips[i-1].duration/3,timeline.clips[i].duration/3);
+      if(timeline.clips[i-1].transition==='dissolve'){
+        joins.push('['+label+']tpad=stop_mode=clone:stop_duration='+fade+'[pad'+i+']');
+        joins.push('[pad'+i+'][s'+i+']xfade=transition=fade:duration='+fade+':offset='+boundary+'[j'+i+']');
+      }else joins.push('['+label+'][s'+i+']concat=n=2:v=1:a=0[j'+i+']');
+      label='j'+i;boundary+=timeline.clips[i].duration;
+    }
+    joinArgs.push('-filter_complex',joins.join(';'),'-map','['+label+']','-t',String(total),'-an','-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-progress','pipe:1','joined.mp4');
+    await runMedia('ffmpeg',joinArgs,{cwd:directory,signal,onProgress:seconds=>onProgress(50+Math.min(1,seconds/total)*5)});
+    segments.splice(0,segments.length,'joined.mp4');
   }
   await writeFile(path.join(directory, "segments.txt"), segments.map(file => `file '${file}'`).join("\n"));
   await writeFile(path.join(directory, "captions.ass"), subtitleDocument(timeline, width, height));
