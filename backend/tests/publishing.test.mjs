@@ -93,3 +93,5 @@ test("thumbnail generation uses existing quote, queue, asset storage and authent
   const download = await fetch(base + `/api/images/assets/${assetId}/download`, { headers }); assert.match(download.headers.get("content-disposition"), /attachment/); assert.deepEqual(Buffer.from(await download.arrayBuffer()), png);
   assert.equal((await Wallet.findOne({ userId: user._id })).availableCredits, 27);
 });
+
+test('browser previews never appear as publishable final exports',async()=>{const preview=await VideoExport.create({userId:user._id,editId:exp.editId,projectId:project._id,revision:0,timeline:{},settings:{filename:'browser-preview'},status:'completed',purpose:'preview',sourceAssetId:new mongoose.Types.ObjectId()});const dashboard=await request('/api/publishing/dashboard');assert.equal(dashboard.status,200);assert.ok(!dashboard.data.exports.some(e=>e._id===String(preview._id)));const invalid=await request('/api/publishing/drafts',post({name:'Not a final export',platform:'youtube',projectId:String(project._id),exportId:String(preview._id),metadata}));assert.equal(invalid.status,400);});

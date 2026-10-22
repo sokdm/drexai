@@ -33,7 +33,7 @@ export async function executeProductionTool(tool:{name:string;query:string},cont
   if(!production)throw new Error("Choose an owned production first");
   const {VideoExport}=await import("../models/VideoEdit.js");
   const edit=await VideoEdit.findOne({productionId:production._id,userId});
-  return edit?await VideoExport.find({editId:edit._id,userId}).select("status progress error revision completedAt").sort({createdAt:-1}).limit(5).lean():[];
+  return edit?await VideoExport.find({editId:edit._id,userId,purpose:{$ne:"preview"}}).select("status progress error revision completedAt").sort({createdAt:-1}).limit(5).lean():[];
  }
 
      if (!production) throw new Error("Choose an owned Studio production before using production tools");

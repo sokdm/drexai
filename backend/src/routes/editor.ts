@@ -94,7 +94,7 @@ editorRouter.get("/edits/:id", wrap(async (req, res) => {
   // Include every timeline asset even when it was reused from a different production.
   const referenced = [...edit.timeline.clips.map((c: any) => c.assetId), ...(edit.timeline.overlays || []).map((o: any) => o.assetId), ...edit.timeline.audio.map((a: any) => a.assetId)].filter(Boolean);
   const missing = await MediaAsset.find({ _id: { $in: referenced.filter((id: string) => !assets.some(a => String(a._id) === id)) }, userId: req.user._id, deletedAt: null }).lean();
-  const exports = await VideoExport.find({ editId: edit._id, userId: req.user._id }).select("-timeline -leaseToken").sort({ createdAt: -1 }).limit(20).lean();
+  const exports = await VideoExport.find({ editId: edit._id, userId: req.user._id,purpose:{$ne:"preview"} }).select("-timeline -leaseToken").sort({ createdAt: -1 }).limit(20).lean();
   res.json({ edit, assets: [...assets, ...missing].map(publicAsset), exports, readiness: await readiness() });
 }));
 editorRouter.put("/edits/:id", wrap(async (req, res) => {
@@ -125,16 +125,30 @@ editorRouter.post("/edits/:id/audio", raw({ type: ["audio/*", "application/octet
 }));
 editorRouter.get("/assets/:assetId/url", wrap(async (req, res) => {
   const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, deletedAt: null });
-  if (!asset) return editorFail("Asset not found", 404); const url = ["video","audio"].includes(asset.type)&&asset.storageProvider!=="local-upload"&&!asset.url?.startsWith("data:") ? `/api/editor/assets/${asset._id}/content` : await editorAssetUrl(asset); if (!url) editorFail("Media unavailable", 503); res.json({ url });
+  if (!asset) return editorFail("Asset not found", 404); const cachedPreview=asset.type==="video"?await VideoExport.findOne({userId:req.user._id,sourceAssetId:asset._id,purpose:"preview",status:"completed"}).select("_id"):null; const url = ["video","audio"].includes(asset.type)&&asset.storageProvider!=="local-upload"&&!asset.url?.startsWith("data:") ? `/api/editor/assets/${asset._id}/content${cachedPreview?"?preview="+cachedPreview._id:""}` : await editorAssetUrl(asset); if (!url) editorFail("Media unavailable", 503); res.json({ url });
 }));
 editorRouter.get('/assets/:assetId/content',wrap(async(req,res)=>{
  const asset=await MediaAsset.findOne({_id:idSchema.parse(req.params.assetId),userId:req.user._id,deletedAt:null,type:{$in:['video','audio']}});if(!asset)return editorFail('Media not found',404);
  const range=req.headers.range;if(range&&!/^bytes=(?:\d+-\d*|-\d+)$/.test(range)){res.status(416).end();return;}
- let object;try{object=await openMediaStream(asset.key,range);}catch(error:any){if(error?.$metadata?.httpStatusCode===416){res.status(416).end();return;}throw error;}
+ let key=asset.key;
+ if(req.query.preview){const preview=await VideoExport.findOne({_id:idSchema.parse(req.query.preview),userId:req.user._id,sourceAssetId:asset._id,purpose:'preview',status:'completed'});if(!preview?.key)return editorFail('Browser preview is not ready',409);key=preview.key;}
+ let object;try{object=await openMediaStream(key,range);}catch(error:any){if(error?.$metadata?.httpStatusCode===416){res.status(416).end();return;}throw error;}
  if(!object.Body)editorFail('Media file is unavailable',404);
  res.status(object.ContentRange?206:200);res.set({'Content-Type':object.ContentType||asset.contentType||'application/octet-stream','Accept-Ranges':'bytes','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});
  if(object.ContentRange)res.setHeader('Content-Range',object.ContentRange);if(object.ContentLength!==undefined)res.setHeader('Content-Length',object.ContentLength);
  try{await pipeline(object.Body as Readable,res);}catch(error){if(!req.destroyed&&!res.destroyed)throw error;}
+}));
+editorRouter.post('/assets/:assetId/prepare-preview',rateLimit({windowMs:60000,limit:6}),wrap(async(req,res)=>{
+ const input=z.object({editId:idSchema,retry:z.boolean().default(false)}).parse(req.body);const edit=await VideoEdit.findOne({_id:input.editId,userId:req.user._id});if(!edit)return editorFail('Edit not found',404);
+ const asset=await MediaAsset.findOne({_id:idSchema.parse(req.params.assetId),userId:req.user._id,type:'video',deletedAt:null});if(!asset)return editorFail('Video not found',404);
+ const existing=await VideoExport.findOne({userId:req.user._id,sourceAssetId:asset._id,purpose:'preview'});if(existing){if(input.retry&&existing.status==="failed"&&existing.attempts<3){await VideoExport.updateOne({_id:existing._id,status:"failed",attempts:{$lt:3}},{$set:{status:"queued",phase:"Browser preview retry queued",progress:0,error:""}});res.json({job:await VideoExport.findById(existing._id)});return;}res.json({job:existing});return;}
+ if(!env.RENDER_QUEUE_ENABLED||!await RenderWorker.exists({expiresAt:{$gt:new Date()}}))return editorFail('Browser preview preparation needs an online editor worker. Download the original clip or retry when the worker is available.',503);
+ if(await VideoExport.countDocuments({userId:req.user._id,status:{$in:['queued','rendering','uploading']}})>=3)return editorFail('Wait for the current editor jobs before preparing another preview.',409);
+ const duration=asset.durationSeconds||0;if(duration<=0||duration>600)return editorFail('Browser preview preparation supports source clips up to ten minutes. Upload a browser-compatible H.264 MP4 for longer sources.');
+ const ratio=(asset.width||1)/(asset.height||1),aspectRatio=ratio>1.2?'16:9':ratio<.8?'9:16':'1:1';
+ const timeline=timelineSchema.parse({clips:[{id:'browser-preview',kind:'video',assetId:String(asset._id),label:'Browser preview',duration,sourceIn:0,sourceAudio:true,sourceVolume:1,fit:'contain'}],audio:[],captions:[],aspectRatio,musicDecision:'none'});
+ let job;try{job=await VideoExport.findOneAndUpdate({userId:req.user._id,sourceAssetId:asset._id,purpose:'preview'},{$setOnInsert:{editId:edit._id,projectId:edit.projectId,revision:0,timeline,settings:{format:'mp4',resolution:'480p',quality:'draft',filename:'browser-preview'},status:'queued',phase:'Queued for browser-compatible preview',progress:0}},{upsert:true,new:true});}catch(error:any){if(error.code!==11000)throw error;job=await VideoExport.findOne({userId:req.user._id,sourceAssetId:asset._id,purpose:'preview'});}
+ res.status(202).json({job});
 }));
 editorRouter.post("/assets/:assetId/waveform", rateLimit({ windowMs: 60000, limit: 6 }), wrap(async (req, res) => {
  const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, deletedAt: null, type: { $in: ["audio", "video"] } });
@@ -172,7 +186,7 @@ editorRouter.get("/exports/:exportId/download", wrap(async (req, res) => {
   await pipeline(object.Body as Readable, res);
 }));
 editorRouter.post("/exports/:exportId/save", wrap(async (req, res) => {
-  const job = await ownExport(req); if (job.status !== "completed") editorFail("Export is not ready", 409);
+  const job = await ownExport(req); if(job.purpose==="preview")return editorFail("A browser preview is not a final project export",409); if (job.status !== "completed") editorFail("Export is not ready", 409);
   await AIProject.updateOne({ _id: job.projectId, userId: req.user._id }, { $set: { finalExportId: job._id, latestEditId: job.editId } });
   job.savedToProjectAt = new Date(); await job.save(); res.json({ export: job });
 }));

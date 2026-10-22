@@ -30,13 +30,13 @@ const wrap = (fn: any) => (req: any, res: any, next: any) => Promise.resolve(fn(
 const input = z.object({ brief: z.string().max(16000).default(""), name: z.string().trim().min(1).max(150), platform: z.enum(["youtube", "shorts", "tiktok", "facebook"]), projectId: id.nullish(), exportId: id.nullish(), metadata: metadataSchema, thumbnailJobId: id.nullish() });
 async function references(userId: any, data: any) {
   if (data.projectId && !await AIProject.exists({ _id: data.projectId, userId })) throw Object.assign(new Error("Project not found"), { statusCode: 404 });
-  if (data.exportId) { const exp = await VideoExport.findOne({ _id: data.exportId, userId, status: "completed" }); if (!exp || data.projectId && String(exp.projectId) !== data.projectId) throw Object.assign(new Error("Finished video does not match this project"), { statusCode: 400 }); data.projectId = String(exp.projectId); }
+  if (data.exportId) { const exp = await VideoExport.findOne({ _id: data.exportId, userId, status: "completed",purpose:{$ne:"preview"} }); if (!exp || data.projectId && String(exp.projectId) !== data.projectId) throw Object.assign(new Error("Finished video does not match this project"), { statusCode: 400 }); data.projectId = String(exp.projectId); }
   if (data.thumbnailJobId && !await ImageGenerationJob.exists({ _id: data.thumbnailJobId, userId })) throw Object.assign(new Error("Thumbnail job not found"), { statusCode: 404 });
 }
 publishingRouter.get("/dashboard", wrap(async (req: any, res: any) => {
   const userId = req.user._id;
   const [exports, projects, drafts, account, history] = await Promise.all([
-    VideoExport.find({ userId, status: "completed" }).select("-timeline -leaseToken -key -bucket").sort({ completedAt: -1 }).limit(50),
+    VideoExport.find({ userId, status: "completed",purpose:{$ne:"preview"} }).select("-timeline -leaseToken -key -bucket").sort({ completedAt: -1 }).limit(50),
     AIProject.find({ userId, finalExportId: { $exists: true } }).select("title summary finalExportId").sort({ updatedAt: -1 }).limit(50),
     PublishingDraft.find({ userId }).sort({ updatedAt: -1 }).limit(100),
     YouTubeConnection.findOne({ userId, disconnectedAt: null }).select("channelId channelTitle channelThumbnail scopes"),

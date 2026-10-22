@@ -8,7 +8,7 @@ export async function nextSeriesTask(userId:string,projectId:string){
  const project=await AIProject.findOne({_id:projectId,userId});if(!project)throw Object.assign(new Error('Project not found'),{statusCode:404,code:'APPROVAL_STATE'});
  const source:any=project.prompts?.sourceSettings,series=source?.series;if(!series||series.part>=series.total)throw Object.assign(new Error('This project has no remaining series parts.'),{statusCode:409,code:'APPROVAL_STATE'});
  const requestId='series:'+series.id+':'+(series.part+1);const existing=await AgentTask.findOne({userId,requestId});if(existing)return existing;
- if(!await VideoExport.exists({userId,projectId,status:'completed'}))throw Object.assign(new Error('Complete an export of this part before continuing the series.'),{statusCode:409,code:'APPROVAL_STATE'});
+ if(!await VideoExport.exists({userId,projectId,status:'completed',purpose:{$ne:'preview'}}))throw Object.assign(new Error('Complete an export of this part before continuing the series.'),{statusCode:409,code:'APPROVAL_STATE'});
  const characters=await CharacterProfile.find({userId,projectId}).lean();const next={...series,part:series.part+1,previousSummary:JSON.stringify({summary:project.summary,ending:project.scenes.at(-1),characters}).slice(0,7000),characters:characters.map(c=>({name:c.name,appearance:c.appearance,clothing:c.clothing,personality:c.personality,voicePreference:c.voicePreference,referenceAssetId:c.referenceAssetId?String(c.referenceAssetId):undefined,referenceImageUrl:c.referenceImageUrl}))};
  const conversation=await AIConversation.create({userId,projectId,title:'Part '+next.part+' of '+next.total,messages:[]});
  const {createStoryTask}=await import('./agentStory.js');

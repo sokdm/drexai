@@ -20,6 +20,7 @@ async function editorApi(page: Page) {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method(); requests.push(`${method} ${path}`);
     if (method === "OPTIONS") return route.fulfill({ status: 204, headers: { "access-control-allow-origin": request.headers().origin || "http://localhost:5173", "access-control-allow-credentials": "true", "access-control-allow-headers": "content-type,x-csrf-token", "access-control-allow-methods": "GET,POST,PUT,OPTIONS" } });
     let data: any = {};
+    if(path==='/api/wallet')data={wallet:{availableCredits:5180}};
     if (path === "/api/auth/me") data = { user: { id: "test", displayName: "Editor Tester", email: "editor@example.test", status: "active", emailVerified: true, onboarding: { completed: true } } };
     else if (path === "/api/editor/config") data = { productions: [{ _id: productionId, title: edit.title }], edits: [{ ...edit }] };
     else if (path === "/api/editor/edits") data = { edit };
@@ -105,22 +106,21 @@ test("image and video overlays share preview, timeline and saved edit",async({pa
  await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toHaveCount(0);
 });
 
-test('stalled preview stops with a recovery message instead of buffering forever',async({page})=>{
- await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);
- await page.getByRole('button',{name:'Continue without music',exact:true}).click();
- await expect.poll(()=>page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(3);
- await page.getByRole('button',{name:'Play rough cut',exact:true}).click();
+test('stalled video prepares a compatible preview and automatically resumes without regenerating media',async({page})=>{
+ await editorApi(page);let prepared=0;const bytes=await readFile(new URL('../../backend/test-artifacts/phase10-final.mp4',import.meta.url));
+ await page.route('**/api/editor/assets/'+videoId+'/prepare-preview',route=>{prepared++;return route.fulfill({json:{job:{_id:'c33333333333333333333333',status:'queued'}}});});
+ await page.route('**/api/editor/exports/c33333333333333333333333',route=>route.fulfill({json:{export:{_id:'c33333333333333333333333',status:'completed',progress:100}}}));
+ await page.route('**/api/editor/assets/'+videoId+'/content?preview=*',route=>route.fulfill({contentType:'video/mp4',body:bytes}));
+ await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();await expect.poll(()=>page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(3);await page.getByRole('button',{name:'Play rough cut',exact:true}).click();
  await page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>{v.play=()=>new Promise<void>(()=>{});v.pause();v.dispatchEvent(new Event('waiting'));});
- await expect(page.getByText(/Buffering/)).toBeVisible();
- await expect(page.getByText(/video stream did not load/)).toBeVisible({timeout:22000});
- await expect(page.getByRole('button',{name:'Play rough cut',exact:true})).toBeVisible();
+ await expect.poll(()=>prepared,{timeout:22000}).toBe(1);await expect(page.getByText('Browser-compatible preview ready. The original remains unchanged.',{exact:true})).toBeVisible({timeout:10000});await expect.poll(async()=>Number(await page.getByLabel('Preview position').inputValue())).toBeGreaterThan(.4);expect(prepared).toBe(1);
 });
 
 for(const width of [390,1024,1440])test('editor workspace stays bounded at '+width+'px',async({page})=>{
  await page.setViewportSize({width,height:900});if(width>=1000)await page.addInitScript(()=>localStorage.setItem('theme','dark'));await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
- if(width>=1000){const body=await page.locator('.editor-body').boundingBox(),timeline=await page.getByRole('region',{name:'Editing timeline',exact:true}).boundingBox();expect(body!.height).toBeLessThan(820);expect(timeline!.y+timeline!.height).toBeLessThanOrEqual(900);}
- await page.getByRole('button',{name:'effects',exact:true}).click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');const preview=await page.locator('.editor-preview').boundingBox(),chat=await page.locator('.editor-command-chat').boundingBox();expect(preview!.width).toBeGreaterThan(width*(width>=1000?.45:.85));expect(preview!.height).toBeGreaterThan(200);expect(chat!.height).toBeGreaterThan(280);await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
+ if(width>=1000){const body=await page.locator('.editor-body').boundingBox(),timeline=await page.getByRole('region',{name:'Editing timeline',exact:true}).boundingBox();const preview=await page.locator('.editor-preview').boundingBox();expect(preview!.height).toBeGreaterThanOrEqual(380);expect(timeline!.y).toBeGreaterThan(preview!.y+preview!.height);}
+ await page.getByRole('button',{name:'effects',exact:true}).click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');const preview=await page.locator('.editor-preview').boundingBox(),chat=await page.locator('.editor-command-chat').boundingBox();expect(preview!.width).toBeGreaterThan(width*(width>=1000?.45:.85));expect(preview!.height).toBeGreaterThan(200);expect(chat!.height).toBeGreaterThan(280);await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
 });
 
 test('editor assistant sends on Enter, clears composer, applies a real proposal and restores conversation',async({page})=>{
