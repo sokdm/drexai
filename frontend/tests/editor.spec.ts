@@ -72,6 +72,7 @@ for (const width of [390, 1440]) test(`Phase 10 timeline edits, save/resume, cap
   await page.screenshot({ path: testInfo.outputPath(`phase10-editor-${width}.png`), fullPage: true });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   const screen = await page.locator(".editor-screen").boundingBox(); expect(screen!.width / screen!.height).toBeCloseTo(9 / 16, 1);
+  await page.locator(".editor-export-drawer > summary").click();
   await page.getByLabel("Output resolution", { exact: true }).selectOption("480p");
   await page.getByRole("button", { name: /Export 480 × 854/ }).click();
   await expect(page.getByText("Your finished video is ready", { exact: false })).toBeVisible();
@@ -111,18 +112,23 @@ test('stalled preview stops with a recovery message instead of buffering forever
  await page.getByRole('button',{name:'Play rough cut',exact:true}).click();
  await page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>{v.play=()=>new Promise<void>(()=>{});v.pause();v.dispatchEvent(new Event('waiting'));});
  await expect(page.getByText(/Buffering/)).toBeVisible();
- await expect(page.getByText(/Video loading stalled/)).toBeVisible({timeout:22000});
+ await expect(page.getByText(/video stream did not load/)).toBeVisible({timeout:22000});
  await expect(page.getByRole('button',{name:'Play rough cut',exact:true})).toBeVisible();
 });
 
 for(const width of [390,1024,1440])test('editor workspace stays bounded at '+width+'px',async({page})=>{
- await page.setViewportSize({width,height:900});await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();
+ await page.setViewportSize({width,height:900});if(width>=1000)await page.addInitScript(()=>localStorage.setItem('theme','dark'));await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
  if(width>=1000){const body=await page.locator('.editor-body').boundingBox(),timeline=await page.getByRole('region',{name:'Editing timeline',exact:true}).boundingBox();expect(body!.height).toBeLessThan(820);expect(timeline!.y+timeline!.height).toBeLessThanOrEqual(900);}
- await page.getByRole('button',{name:'effects',exact:true}).click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
+ await page.getByRole('button',{name:'effects',exact:true}).click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');const preview=await page.locator('.editor-preview').boundingBox(),chat=await page.locator('.editor-command-chat').boundingBox();expect(preview!.width).toBeGreaterThan(width*(width>=1000?.45:.85));expect(preview!.height).toBeGreaterThan(200);expect(chat!.height).toBeGreaterThan(280);await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
 });
 
 test('editor assistant sends on Enter, clears composer, applies a real proposal and restores conversation',async({page})=>{
  const state=await editorApi(page);let calls=0;await page.route('**/api/editor/edits/'+editId+'/command',route=>{calls++;const body=route.request().postDataJSON();expect(body.message).toBe('Smooth the joins');const explanation='Applied dissolve joins without shifting audio.';state.edit.assistantMessages=['You: '+body.message,explanation];return route.fulfill({json:{timeline:{...body.timeline,clips:body.timeline.clips.map((c:any,i:number)=>({...c,transition:i===0?'dissolve':'cut'}))},explanation,note:'Review or save the change.'}});});
  await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();await page.getByLabel('Editing command',{exact:true}).fill('Smooth the joins');await page.getByLabel('Editing command',{exact:true}).press('Enter');await expect(page.getByLabel('Editing command',{exact:true})).toHaveValue('');await expect(page.getByRole('log')).toContainText('Applied dissolve');expect(calls).toBe(1);await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');await page.reload();await expect(page.getByRole('log')).toContainText('Applied dissolve');
+});
+
+test('preview timeline follows video time rather than racing ahead during a playback stall',async({page})=>{
+ await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();await expect.poll(()=>page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(3);await page.getByRole('button',{name:'Play rough cut',exact:true}).click();await expect.poll(async()=>Number(await page.getByLabel('Preview position').inputValue())).toBeGreaterThan(.2);
+ const sourceTime=await page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>{v.play=()=>new Promise<void>(()=>{});v.pause();return v.currentTime;});await page.waitForTimeout(900);expect(Math.abs(Number(await page.getByLabel('Preview position').inputValue())-sourceTime)).toBeLessThan(.15);
 });

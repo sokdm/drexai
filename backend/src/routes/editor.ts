@@ -123,7 +123,16 @@ editorRouter.post("/edits/:id/audio", raw({ type: ["audio/*", "application/octet
 }));
 editorRouter.get("/assets/:assetId/url", wrap(async (req, res) => {
   const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, deletedAt: null });
-  if (!asset) editorFail("Asset not found", 404); const url = await editorAssetUrl(asset); if (!url) editorFail("Media unavailable", 503); res.json({ url });
+  if (!asset) return editorFail("Asset not found", 404); const url = ["video","audio"].includes(asset.type)&&asset.storageProvider!=="local-upload"&&!asset.url?.startsWith("data:") ? `/api/editor/assets/${asset._id}/content` : await editorAssetUrl(asset); if (!url) editorFail("Media unavailable", 503); res.json({ url });
+}));
+editorRouter.get('/assets/:assetId/content',wrap(async(req,res)=>{
+ const asset=await MediaAsset.findOne({_id:idSchema.parse(req.params.assetId),userId:req.user._id,deletedAt:null,type:{$in:['video','audio']}});if(!asset)return editorFail('Media not found',404);
+ const range=req.headers.range;if(range&&!/^bytes=(?:\d+-\d*|-\d+)$/.test(range)){res.status(416).end();return;}
+ let object;try{object=await openMediaStream(asset.key,range);}catch(error:any){if(error?.$metadata?.httpStatusCode===416){res.status(416).end();return;}throw error;}
+ if(!object.Body)editorFail('Media file is unavailable',404);
+ res.status(object.ContentRange?206:200);res.set({'Content-Type':object.ContentType||asset.contentType||'application/octet-stream','Accept-Ranges':'bytes','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});
+ if(object.ContentRange)res.setHeader('Content-Range',object.ContentRange);if(object.ContentLength!==undefined)res.setHeader('Content-Length',object.ContentLength);
+ try{await pipeline(object.Body as Readable,res);}catch(error){if(!req.destroyed&&!res.destroyed)throw error;}
 }));
 editorRouter.post("/assets/:assetId/waveform", rateLimit({ windowMs: 60000, limit: 6 }), wrap(async (req, res) => {
  const asset = await MediaAsset.findOne({ _id: idSchema.parse(req.params.assetId), userId: req.user._id, deletedAt: null, type: { $in: ["audio", "video"] } });

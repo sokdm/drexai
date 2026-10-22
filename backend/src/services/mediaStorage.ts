@@ -80,10 +80,10 @@ export async function uploadVerifiedExport(file: string, key: string) {
   if (!response.ok || bytes.length < 12 || bytes.toString("ascii", 4, 8) !== "ftyp") throw new Error("R2 export could not be accessed as an MP4");
   return { key, bucket: env.R2_BUCKET, sizeBytes: size };
 }
-export async function openMediaStream(key: string) {
+export async function openMediaStream(key: string, range?:string) {
   const client = r2Client();
   if (!client || !env.R2_BUCKET) throw new Error("R2 storage unavailable");
-  return client.send(new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
+  return client.send(new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key,...(range?{Range:range}:{}) }));
 }
 
 export async function creativeUploadUrl(key: string, size: number) {
