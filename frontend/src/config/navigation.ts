@@ -9,7 +9,7 @@ export const dashboardItems = [
   { label: "Script Builder", path: "/dashboard/script-builder", icon: PenLine },
   { label: "Text to Image", path: "/dashboard/text-to-image", icon: Image },
   { label: "Image to Video", path: "/dashboard/image-to-video", icon: Video },
-  { label: "Character Animator", path: "/dashboard/character-animator", icon: Sparkles },
+  { label: "Character Animator (Coming soon)", path: "/dashboard/character-animator", icon: Sparkles },
   { label: "Voice Studio", path: "/dashboard/voice-studio", icon: Mic },
   { label: "AI Studio", path: "/dashboard/ai-studio", icon: Clapperboard },
   { label: "Video Editor", path: "/dashboard/video-editor", icon: Edit3 },

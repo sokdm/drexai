@@ -6,6 +6,10 @@ import {mediaUrl} from './GenerationResults';
 import './character-animator.css';
 type Asset={_id:string;url?:string;type?:string;durationSeconds?:number;metadata?:{name?:string}};
 export function CharacterAnimatorPage(){
+ return <section className="mx-auto flex min-h-[60vh] max-w-3xl flex-col items-center justify-center gap-5 rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-900"><Sparkles size={40} className="text-violet-500"/><span className="rounded-full bg-violet-100 px-4 py-1 text-sm font-semibold text-violet-700 dark:bg-violet-950 dark:text-violet-200">Coming soon</span><h1 className="text-3xl font-bold">Character Animator</h1><p className="max-w-lg text-slate-600 dark:text-slate-300">Live character animation is not available yet. Your existing recordings remain available in Media Library and Video Editor.</p><div className="flex flex-wrap justify-center gap-3"><Link className="rounded-lg bg-violet-600 px-5 py-3 text-white" to="/dashboard/ai-studio">Open AI Studio</Link><Link className="rounded-lg border border-slate-300 px-5 py-3 dark:border-slate-600" to="/dashboard/video-editor">Open Video Editor</Link></div></section>;
+}
+// Preserved for a future release; not mounted while the feature is coming soon.
+export function CharacterAnimatorWorkspace(){
  const [config,setConfig]=useState<any>(null),[images,setImages]=useState<Asset[]>([]),[selected,setSelected]=useState(''),[characterUrl,setCharacterUrl]=useState('');
  const [ratio,setRatio]=useState('9:16'),[microphone,setMicrophone]=useState(false),[licensed,setLicensed]=useState(false),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [cameraOpen,setCameraOpen]=useState(false),[recording,setRecording]=useState(false),[elapsed,setElapsed]=useState(0),[source,setSource]=useState(''),[recordUrl,setRecordUrl]=useState(''),[voiceUrl,setVoiceUrl]=useState(''),[edit,setEdit]=useState<any>(null),[saved,setSaved]=useState(false);

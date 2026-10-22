@@ -65,8 +65,7 @@ export function AuthPage({ mode }: { mode: keyof typeof copy }) {
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Something went wrong";
-      if (text.toLowerCase().includes("verification")) navigate(`/verify-email?email=${encodeURIComponent(String(form.email ?? ""))}`);
-      else setError(text);
+      setError(text);
     } finally {
       setLoading(false);setSecurityToken('');setSecurityAttempt(n=>n+1);
     }
@@ -79,7 +78,7 @@ export function AuthPage({ mode }: { mode: keyof typeof copy }) {
         <div className="mt-14 max-w-md">
           <div className="mb-8 rounded-md border border-line bg-cloud p-5 dark:border-slate-700 dark:bg-slate-950"><Loader label="Securing your creator workspace" /></div>
           <h1 className="text-5xl font-black">{brand.name} account setup</h1>
-          <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">Create an account, verify your email OTP, then enter the dashboard with your wallet and research tools ready.</p>
+          <p className="mt-5 text-lg leading-8 text-slate-600 dark:text-slate-300">{mode === "login" ? "Sign in with your email and password. Cloudflare helps protect your account." : "Create an account and verify your email to set up your creator workspace."}</p>
         </div>
       </aside>
       <main className="flex items-center justify-center px-4 py-10">

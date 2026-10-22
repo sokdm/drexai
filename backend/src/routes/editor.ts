@@ -49,14 +49,16 @@ async function readiness() {
 // unavailable until a verified streaming adapter and USD pricing are configured.
 editorRouter.get('/animator/workspace',wrap(async(req,res)=>{
  const workspace=await AnimatorWorkspace.findOne({userId:req.user._id}).lean();
- res.json({workspace,storageConfigured:persistentStorageConfigured(),provider:{name:'Xmax X2.0',liveAvailable:false,voiceConversionAvailable:false,creditsPerSecond:null,reason:'Live animation needs a verified Xmax connection and USD pricing. Camera capture and input recording are available without AI processing.',documentation:'https://platform.xmax.ai/docs/capabilities/realtime-video/sdk-reference'}});
+ res.json({status:'coming_soon',comingSoon:true,workspace,storageConfigured:persistentStorageConfigured(),provider:{name:'Xmax X2.0',liveAvailable:false,voiceConversionAvailable:false,creditsPerSecond:null,reason:'Live animation needs a verified Xmax connection and USD pricing. Character Animator is coming soon; new animator sessions are currently disabled.',documentation:'https://platform.xmax.ai/docs/capabilities/realtime-video/sdk-reference'}});
 }));
-editorRouter.put('/animator/workspace',wrap(async(req,res)=>{
+editorRouter.put('/animator/workspace',(_req,res)=>{res.status(423).json({error:'Character Animator is coming soon.',code:'COMING_SOON'});});
+// Keep the workspace implementation available for release without exposing a live write route.
+async function saveAnimatorWorkspace(req:Request,res:Response){
  const input=z.object({editId:idSchema.optional(),characterAssetId:idSchema.optional(),referenceAudioAssetId:idSchema.optional(),aspectRatio:z.enum(['9:16','16:9','1:1']),microphone:z.boolean()}).parse(req.body);
  if(input.editId&&!await VideoEdit.exists({_id:input.editId,userId:req.user._id}))editorFail('Edit not found',404);
  for(const [key,type] of [['characterAssetId','image'],['referenceAudioAssetId','audio']] as const){if(input[key]&&!await MediaAsset.exists({_id:input[key],userId:req.user._id,type,deletedAt:null}))editorFail('Media not found',404);}
  const workspace=await AnimatorWorkspace.findOneAndUpdate({userId:req.user._id},{$set:input},{upsert:true,new:true});res.json({workspace});
-}));
+}
 editorRouter.get("/config", wrap(async (req, res) => {
   const productions = await StudioProduction.find({ userId: req.user._id, "timeline.0": { $exists: true } }).select("title status projectId createdAt").sort({ updatedAt: -1 }).limit(100).lean();
   const edits = await VideoEdit.find({ userId: req.user._id }).select("title productionId projectId revision updatedAt").sort({ updatedAt: -1 }).limit(100).lean();
