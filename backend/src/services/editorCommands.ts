@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { timelineSchema, timelineDuration, type EditorTimeline } from "@drex/shared";
-export function editingCommand(input: EditorTimeline, message: string, captions: any[] = []) {
+export function editingCommand(input: EditorTimeline, message: string, captions: any[] = []): {timeline:EditorTimeline;explanation:string} {
  const timeline = timelineSchema.parse(structuredClone(input)), text = message.trim().toLowerCase(); let result: EditorTimeline = timeline, explanation = "";
+ // Compose the reference assistant's common request through the existing tools.
+ // Both stages operate on a clone; a failed stage cannot commit a partial edit.
+ if (/cinematic/.test(text) && /caption|subtitle/.test(text) && !/silent|silence/.test(text)) {
+  const visual = editingCommand(input, /smooth|seamless|join|dissolve/.test(text) ? "smooth joins" : "cinematic", captions);
+  const graded = /smooth|seamless|join|dissolve/.test(text) ? editingCommand(visual.timeline,"cinematic",captions) : visual;
+  const captioned = editingCommand(graded.timeline,"add captions",captions);
+  return {timeline:captioned.timeline,explanation:[visual.explanation,graded===visual?"":graded.explanation,captioned.explanation].filter(Boolean).join(" ")};
+ }
  if (/silent|silence/.test(text)) throw new Error("This command requires analysis or effects that this editing assistant does not yet support. No timeline changes were made.");
  if (/smooth|seamless|join|joing|blend|dissolve|cross.?fade|better animations/.test(text)) {
   result.clips=result.clips.map((c,i)=>({...c,transition:i<result.clips.length-1?'dissolve':'cut'}));

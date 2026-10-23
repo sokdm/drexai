@@ -18,6 +18,8 @@ export function DashboardLayout() {
   const activeTool = dashboardItems.find(({ path }) => path !== "/dashboard" && (pathname === path || pathname.startsWith(`${path}/`)));
   const standalone = activeTool && ["/dashboard/youtube-research", "/dashboard/voice-studio"].includes(activeTool.path);
 
+  if (activeTool?.path === "/dashboard/video-editor") return <div className="feature-workspace reference-editor-shell"><main className="workspace-editor-content"><Outlet /></main><OnboardingTour /></div>;
+
   if (activeTool) {
     const Icon = activeTool.icon;
     return (

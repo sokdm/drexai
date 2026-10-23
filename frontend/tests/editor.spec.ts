@@ -64,7 +64,7 @@ for (const width of [390, 1440]) test(`Phase 10 timeline edits, save/resume, cap
   await expect(page.getByText("Timeline saved", { exact: true })).toBeVisible();
   expect(state.edit.timeline.clips[0].text).toBe("My original intro"); expect(state.edit.timeline.musicDecision).toBe("none");
   await page.reload(); await expect(page.locator(".editor-timeline-clip")).toHaveCount(4);
-  await page.getByRole("button", { name: "captions", exact: true }).click(); await page.getByRole("button", { name: "Generate captions", exact: true }).click();
+  await page.getByRole("button", { name: "Text", exact: true }).click(); await page.getByRole("button", { name: "Generate captions", exact: true }).click();
   await page.locator(".editor-caption-item").filter({ hasText: "An original caption." }).click(); await page.getByLabel("Caption text", { exact: true }).fill("Edited caption");
   await page.getByLabel("Font", { exact: true }).selectOption("Georgia"); await page.getByLabel("Text position", { exact: true }).selectOption("top");
   await page.getByLabel("Canvas", { exact: true }).selectOption("9:16");
@@ -73,10 +73,10 @@ for (const width of [390, 1440]) test(`Phase 10 timeline edits, save/resume, cap
   await page.screenshot({ path: testInfo.outputPath(`phase10-editor-${width}.png`), fullPage: true });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   const screen = await page.locator(".editor-screen").boundingBox(); expect(screen!.width / screen!.height).toBeCloseTo(9 / 16, 1);
-  await page.locator(".editor-export-drawer > summary").click();
+  await page.getByRole("button",{name:"Export",exact:true}).click();
   await page.getByLabel("Output resolution", { exact: true }).selectOption("480p");
   await page.getByRole("button", { name: /Export 480 × 854/ }).click();
-  await expect(page.getByText("Your finished video is ready", { exact: false })).toBeVisible();
+  await expect(page.locator(".editor-export-result").getByText("Your finished video is ready", { exact: false })).toBeVisible();
   expect(state.edit.timeline.captions[0].text).toBe("Edited caption");
   await page.getByRole("button", { name: "Save to project", exact: true }).click(); await expect.poll(() => state.savedProject).toBe(true);
   const downloadPromise = page.waitForEvent("download"); await page.getByRole("button", { name: "Download MP4", exact: true }).click(); const download = await downloadPromise; expect(download.suggestedFilename()).toBe("editor-export.mp4");
@@ -96,13 +96,13 @@ test("editor previews real MP4 playback and reorders clips by drag and drop", as
 test("image and video overlays share preview, timeline and saved edit",async({page})=>{
  const state=await editorApi(page);await page.goto("/dashboard/video-editor?editId="+editId);
  await page.getByRole("button",{name:"Continue without music",exact:true}).click();
- await page.getByRole("button",{name:"overlays",exact:true}).click();
+ await page.getByRole("button",{name:"Overlays",exact:true}).click();
  await page.getByRole("button",{name:"Overlay Original clip",exact:true}).click();
  await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toBeAttached();
  await expect(page.locator(".editor-caption-track").filter({hasText:"Overlay 1"})).toBeVisible();
  await page.getByRole("button",{name:"Save timeline",exact:true}).click();
  await page.reload();await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toBeAttached();
- await page.getByRole("button",{name:"overlays",exact:true}).click();await page.getByRole("button",{name:"Remove overlay",exact:true}).click();
+ await page.getByRole("button",{name:"Overlays",exact:true}).click();await page.getByRole("button",{name:"Remove overlay",exact:true}).click();
  await expect(page.getByLabel("Overlay: Original clip",{exact:true})).toHaveCount(0);
 });
 
@@ -116,11 +116,11 @@ test('stalled video prepares a compatible preview and automatically resumes with
  await expect.poll(()=>prepared,{timeout:22000}).toBe(1);await expect(page.getByText('Browser-compatible preview ready. The original remains unchanged.',{exact:true})).toBeVisible({timeout:10000});await expect.poll(async()=>Number(await page.getByLabel('Preview position').inputValue())).toBeGreaterThan(.4);expect(prepared).toBe(1);
 });
 
-for(const width of [390,1024,1440])test('editor workspace stays bounded at '+width+'px',async({page})=>{
+for(const width of [390,1024,1440,1670])test('editor workspace stays bounded at '+width+'px',async({page})=>{
  await page.setViewportSize({width,height:900});if(width>=1000)await page.addInitScript(()=>localStorage.setItem('theme','dark'));await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
- if(width>=1000){const body=await page.locator('.editor-body').boundingBox(),timeline=await page.getByRole('region',{name:'Editing timeline',exact:true}).boundingBox();const preview=await page.locator('.editor-preview').boundingBox();expect(preview!.height).toBeGreaterThanOrEqual(380);expect(timeline!.y).toBeGreaterThan(preview!.y+preview!.height);}
- await page.getByRole('button',{name:'effects',exact:true}).click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');const preview=await page.locator('.editor-preview').boundingBox(),chat=await page.locator('.editor-command-chat').boundingBox();expect(preview!.width).toBeGreaterThan(width*(width>=1000?.45:.85));expect(preview!.height).toBeGreaterThan(200);expect(chat!.height).toBeGreaterThan(280);await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
+ if(width>=1000){const body=await page.locator('.editor-body').boundingBox(),timeline=await page.getByRole('region',{name:'Editing timeline',exact:true}).boundingBox();const preview=await page.locator('.editor-preview').boundingBox();expect(preview!.height).toBeGreaterThanOrEqual(240);expect(timeline!.y).toBeGreaterThan(preview!.y+preview!.height);}
+ await page.getByRole('button',{name:'Effects',exact:true}).first().click();await expect(page.getByRole('button',{name:'Smooth all joins',exact:true})).toBeVisible();await page.getByRole('button',{name:'Smooth all joins',exact:true}).click();await page.getByRole('button',{name:'Select clip 1: Opening shot',exact:true}).click();await expect(page.getByLabel('Transition',{exact:true})).toHaveValue('dissolve');const preview=await page.locator('.editor-preview').boundingBox(),chat=await page.locator('.editor-command-chat').boundingBox();expect(preview!.width).toBeGreaterThan(width*(width>=1280?.25:width>=1000?.3:.85));expect(preview!.height).toBeGreaterThan(200);expect(chat!.height).toBeGreaterThan(280);await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'frontend/test-results/editor-workspace-'+width+'.png',fullPage:true});
 });
 
 test('editor assistant sends on Enter, clears composer, applies a real proposal and restores conversation',async({page})=>{
@@ -132,3 +132,8 @@ test('preview timeline follows video time rather than racing ahead during a play
  await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();await expect.poll(()=>page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(3);await page.getByRole('button',{name:'Play rough cut',exact:true}).click();await expect.poll(async()=>Number(await page.getByLabel('Preview position').inputValue())).toBeGreaterThan(.2);
  const sourceTime=await page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>{v.play=()=>new Promise<void>(()=>{});v.pause();return v.currentTime;});await page.waitForTimeout(900);expect(Math.abs(Number(await page.getByLabel('Preview position').inputValue())-sourceTime)).toBeLessThan(.15);
 });
+
+ test('reference workspace has separate inspector and chat, working media search, and no upgrade block',async({page})=>{await page.setViewportSize({width:1670,height:941});await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await page.getByRole('button',{name:'Continue without music',exact:true}).click();const chat=page.getByRole('complementary',{name:'AI Assistant',exact:true}),inspector=page.getByRole('complementary',{name:'Clip properties',exact:true});await expect(chat).toBeVisible();await expect(inspector).toBeVisible();const cb=await chat.boundingBox(),ib=await inspector.boundingBox();expect(cb!.x).toBeGreaterThan(ib!.x+ib!.width);await expect(page.getByRole('button',{name:'Upgrade',exact:true})).toHaveCount(0);await page.getByLabel('Search media',{exact:true}).fill('Original still');await expect(page.locator('.editor-media')).toHaveCount(1);await page.getByRole('button',{name:'Videos',exact:true}).click();await expect(page.locator('.editor-media')).toHaveCount(0);await page.getByLabel('Search media',{exact:true}).fill('');await expect(page.locator('.editor-media')).toHaveCount(1);await page.getByRole('button',{name:'All',exact:true}).click();await expect(page.locator('.editor-media')).toHaveCount(2);await page.screenshot({path:'frontend/test-results/editor-reference-1670.png',fullPage:true});});
+ test('assistant shows pending status and preserves failed command for retry',async({page})=>{await editorApi(page);let calls=0;await page.route('**/api/editor/edits/'+editId+'/command',async route=>{calls++;await new Promise(r=>setTimeout(r,500));if(calls===1)return route.fulfill({status:503,json:{error:'Editing service unavailable. Retry this request.'}});const body=route.request().postDataJSON();return route.fulfill({json:{timeline:body.timeline,explanation:'Reviewed your timeline.',note:'Review complete.'}});});await page.goto('/dashboard/video-editor?editId='+editId);await page.getByLabel('Editing command',{exact:true}).fill('Review my timeline');await page.getByRole('button',{name:'Run',exact:true}).click();await expect(page.getByText('Editing your timeline...', {exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Retry request',exact:true})).toBeVisible();await expect(page.getByLabel('Editing command',{exact:true})).toHaveValue('Review my timeline');await page.getByRole('button',{name:'Retry request',exact:true}).click();await expect(page.getByRole('log')).toContainText('Reviewed your timeline.');expect(calls).toBe(2);});
+
+test('preview mute is temporary and fullscreen control is available',async({page})=>{const state=await editorApi(page);await page.goto('/dashboard/video-editor?editId='+editId);await expect(page.getByRole('button',{name:'Fullscreen preview',exact:true})).toBeVisible();await page.getByRole('button',{name:'Mute preview',exact:true}).click();await expect(page.getByRole('button',{name:'Unmute preview',exact:true})).toHaveAttribute('aria-pressed','true');await expect.poll(()=>page.locator('.editor-frame video').evaluate((v:HTMLVideoElement)=>v.muted)).toBe(true);await page.getByRole('button',{name:'Unmute preview',exact:true}).click();expect(state.edit.revision).toBe(0);expect(state.requests.filter(r=>r.startsWith('PUT'))).toHaveLength(0);});

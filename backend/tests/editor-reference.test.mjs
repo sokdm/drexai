@@ -1,0 +1,9 @@
+﻿import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {editingCommand} from '../dist/services/editorCommands.js';
+const style={font:'Arial',size:36,position:'bottom',preset:'clean'};
+const timeline={clips:[{id:'first',kind:'image',assetId:'c22222222222222222222222',label:'Opening',duration:3,sourceIn:0,transition:'cut',fit:'contain',text:'',textStyle:style},{id:'last',kind:'image',assetId:'d22222222222222222222222',label:'Ending',duration:3,sourceIn:0,transition:'cut',fit:'contain',text:'',textStyle:style}],audio:[],captions:[],aspectRatio:'16:9',musicDecision:'none'};
+const captions=[{id:'caption',text:'Reviewed words',start:0,end:2,style}];
+test('reference assistant composes cinematic look and actual caption tracks without mutating its input',()=>{const original=structuredClone(timeline);const result=editingCommand(timeline,'Make this video more cinematic and add captions.',captions);assert.equal(result.timeline.clips[0].look,'cinematic');assert.equal(result.timeline.captions[0].text,'Reviewed words');assert.match(result.explanation,/caption tracks/);assert.deepEqual(timeline,original);});
+test('compound assistant edit fails atomically when a reviewed transcript is missing',()=>{const original=structuredClone(timeline);assert.throws(()=>editingCommand(timeline,'Make cinematic and add captions'),/No reviewed transcript/);assert.deepEqual(timeline,original);});
+test('cinematic, smooth joins and captions reuse all three existing tools',()=>{const result=editingCommand(timeline,'Make cinematic, smooth joins and add captions',captions);assert.equal(result.timeline.clips[0].transition,'dissolve');assert.equal(result.timeline.clips[1].transition,'cut');assert.equal(result.timeline.clips[0].look,'cinematic');assert.equal(result.timeline.captions.length,1);});
